@@ -1,0 +1,1855 @@
+<!doctype html>
+<html lang="hu">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#262d33">
+<title>Munkakövetés</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ===== Tokenek: horganyzott acél alap, izzó fém narancs, andon jelzőfények ===== */
+:root{
+  --bg:#262d33;       /* acéllemez */
+  --panel:#2e363d;
+  --raised:#39424a;
+  --line:#4a555e;
+  --muted:#99a6ae;
+  --chalk:#eceee8;    /* zsírkréta fehér */
+  --hot:#ff7a1a;      /* izzó fém: márka, fókusz, elsődleges gomb */
+  --hot-ink:#221204;
+  --go:#35c46a;       /* andon zöld: dolgozik */
+  --wait:#ffc933;     /* andon sárga: szünet */
+  --stop:#ff4b3e;     /* andon piros: elakadt */
+  --stop-bg:#3b2523;
+  --font:'Barlow',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  --cond:'Barlow Condensed','Barlow',system-ui,sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{background:var(--bg);color:var(--chalk);font-family:var(--font);font-size:16px;line-height:1.45;
+  -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid var(--hot);outline-offset:2px}
+[hidden]{display:none !important}
+.muted{color:var(--muted)}
+.small{font-size:14px}
+
+/* ===== Felső sáv ===== */
+.bar{position:sticky;top:0;z-index:20;display:flex;align-items:stretch;gap:24px;padding:0 20px;min-height:56px;
+  background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px}
+.brand-name{font-family:var(--cond);font-weight:700;font-size:23px;letter-spacing:.01em}
+.brand-mark{display:inline-flex;flex-direction:column;gap:2px;padding:3px;border-radius:4px;background:#1d2327}
+.brand-mark i{display:block;width:7px;height:7px;border-radius:50%}
+.brand-mark i:nth-child(1){background:var(--stop)}
+.brand-mark i:nth-child(2){background:var(--wait)}
+.brand-mark i:nth-child(3){background:var(--go)}
+.brand-mark.big{padding:5px;gap:4px;border-radius:7px;align-self:flex-start}
+.brand-mark.big i{width:14px;height:14px}
+.tabs{display:flex;gap:2px;overflow-x:auto}
+.tabs a{display:flex;align-items:center;gap:8px;padding:0 14px;color:var(--muted);text-decoration:none;font-weight:600;
+  border-bottom:3px solid transparent;white-space:nowrap}
+.tabs a:hover{color:var(--chalk)}
+.tabs a[aria-current=page]{color:var(--chalk);border-bottom-color:var(--hot)}
+.badge{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;padding:0 6px;
+  border-radius:11px;background:var(--stop);color:#fff;font-size:13px;font-weight:700}
+.bar-end{margin-left:auto;display:flex;align-items:center;gap:12px}
+.mode{font-size:13px;font-weight:600;color:var(--muted);border:1px dashed var(--line);border-radius:6px;padding:3px 8px}
+
+/* ===== Nézetek, eszköztár, gombok ===== */
+.view{padding:20px 24px 56px;max-width:1440px;margin:0 auto}
+.toolbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:16px}
+.view-title{flex:1 1 auto;margin:0;font-family:var(--cond);font-weight:600;font-size:29px;line-height:1.1}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:38px;padding:0 14px;border-radius:8px;
+  border:1px solid var(--line);background:var(--raised);font-weight:600;white-space:nowrap}
+.btn:hover{border-color:var(--muted)}
+.btn:disabled{opacity:.45;cursor:default}
+.btn.icon{width:38px;padding:0;font-size:22px;line-height:1}
+.btn.small{min-height:32px;padding:0 10px;font-size:14px}
+.btn.ghost{background:transparent}
+.btn.wide{width:100%}
+.btn-primary{background:var(--hot);border-color:var(--hot);color:var(--hot-ink)}
+.btn-primary:hover{border-color:var(--hot);filter:brightness(1.07)}
+.btn-danger{background:transparent;border-color:var(--stop);color:var(--stop)}
+.datenav{display:flex;align-items:center;gap:6px}
+.date-input{min-height:38px;padding:0 10px;border-radius:8px;border:1px solid var(--line);background:var(--raised)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{border:0;background:transparent;min-height:36px;padding:0 12px;color:var(--muted);font-weight:600}
+.seg button[aria-pressed=true]{background:var(--raised);color:var(--chalk)}
+.loading{padding:40px 0;color:var(--muted)}
+.empty{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:24px;border:1px dashed var(--line);border-radius:12px;color:var(--muted)}
+.empty p{margin:0}
+.tag{display:inline-block;padding:1px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);font-size:12.5px;font-weight:600;white-space:nowrap}
+.tag-offplan{border-color:#6f83a6;color:#bccbe6}
+.tag-warn{border-color:var(--hot);color:var(--hot)}
+.swatch{display:inline-block;flex:none;width:12px;height:12px;border-radius:3px;background:var(--c,#9aa7b0)}
+
+/* ===== Élő nézet ===== */
+.alert{display:flex;margin-bottom:16px;border:1px solid #7a2e28;border-radius:10px;overflow:hidden;background:var(--stop-bg)}
+.alert-stripe{flex:none;width:14px;background:repeating-linear-gradient(-45deg,var(--stop) 0 8px,#2a1513 8px 16px)}
+.alert-body{padding:10px 14px}
+.alert-body b{color:#ffd9d5}
+.alert-body ul{margin:4px 0 0;padding-left:18px}
+.counts{display:flex;flex-wrap:wrap;gap:6px 20px;margin:0 0 18px;color:var(--muted)}
+.count{display:inline-flex;align-items:center;gap:7px}
+.count i{width:10px;height:10px;border-radius:50%;background:var(--line)}
+.count b{color:var(--chalk)}
+.count.st-work i{background:var(--go)}
+.count.st-pause i{background:var(--wait)}
+.count.st-block i{background:var(--stop)}
+.count.st-done i{background:var(--muted)}
+.count.st-off i{background:transparent;border:2px solid var(--muted)}
+.warn-line{margin:-6px 0 16px;color:var(--hot);font-weight:600}
+.group{margin-bottom:24px}
+.group-title{display:flex;align-items:baseline;gap:8px;margin:0 0 4px;padding-bottom:6px;border-bottom:1px solid var(--line);
+  font-family:var(--cond);font-weight:600;font-size:21px}
+.group-n{font-family:var(--font);font-size:14px;font-weight:500;color:var(--muted)}
+.row{border-bottom:1px solid rgba(74,85,94,.55)}
+.row-main{display:grid;grid-template-columns:auto minmax(150px,1.1fr) minmax(200px,2fr) 110px 150px 76px;align-items:center;gap:14px;padding:10px 4px}
+.stack{display:inline-flex;flex-direction:column;gap:3px;padding:4px;border-radius:6px;background:#1d2327}
+.stack i{display:block;width:10px;height:10px;border-radius:50%;background:#3b454c}
+.st-block .stack .l-red{background:var(--stop);box-shadow:0 0 9px var(--stop)}
+.st-pause .stack .l-amber{background:var(--wait);box-shadow:0 0 9px var(--wait)}
+.st-work .stack .l-green{background:var(--go);box-shadow:0 0 9px var(--go)}
+.who{display:flex;flex-direction:column;min-width:0}
+.who .name{font-weight:600;font-size:17px}
+.who .state{font-size:14px;color:var(--muted)}
+.st-work .who .state{color:var(--go)}
+.st-pause .who .state{color:var(--wait)}
+.st-block .who .state{color:var(--stop);font-weight:600}
+.what{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;min-width:0}
+.what .task-name{font-weight:600}
+.tot{display:flex;flex-direction:column;font-size:14px}
+.row-detail{display:grid;grid-template-columns:1fr 1fr;gap:28px;padding:2px 4px 18px 42px}
+.row-detail h3{margin:0 0 6px;font-size:14px;font-weight:600;color:var(--muted)}
+.row-detail p{margin:8px 0 12px}
+.log,.pertask{list-style:none;margin:0;padding:0}
+.log li{display:flex;gap:12px;padding:3px 0}
+.log time{min-width:44px;color:var(--muted)}
+.pertask li{display:flex;align-items:center;gap:8px;padding:3px 0}
+.group-absent .row-main{opacity:.85}
+
+/* ===== Heti terv ===== */
+.pgrid-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.pgrid{display:grid;grid-template-columns:190px repeat(var(--days),minmax(150px,1fr));min-width:calc(190px + var(--days) * 150px)}
+.phead{display:flex;flex-direction:column;padding:8px 10px;background:var(--raised);border-bottom:1px solid var(--line)}
+.phead b{font-weight:600}
+.phead span{font-size:13px;color:var(--muted)}
+.phead.is-today{box-shadow:inset 0 -3px 0 var(--hot)}
+.pcorner{position:sticky;left:0;z-index:2;justify-content:flex-end;color:var(--muted);font-size:13px}
+.pteam{grid-column:1/-1;padding:12px 10px 4px;border-bottom:1px solid var(--line);font-family:var(--cond);font-weight:600;font-size:18px;color:var(--muted)}
+.pname{position:sticky;left:0;z-index:1;display:flex;align-items:center;padding:8px 10px;border-bottom:1px solid var(--line);background:var(--panel);font-weight:600}
+.pcell{display:flex;flex-direction:column;gap:4px;min-height:50px;padding:6px;border-bottom:1px solid var(--line);border-left:1px solid rgba(74,85,94,.6)}
+.pcell.is-today{background:rgba(255,122,26,.05)}
+.chip{display:flex;align-items:flex-start;gap:4px;padding:4px 2px 4px 8px;border-left:4px solid var(--c);border-radius:6px;
+  background:var(--raised);background:color-mix(in srgb,var(--c) 15%,var(--panel));font-size:14px;font-weight:600;line-height:1.25}
+.chip-text{flex:1;min-width:0}
+.chip-text small{display:block;font-size:12.5px;font-weight:500;color:var(--muted)}
+.chip-x{border:0;background:transparent;color:var(--muted);font-size:17px;line-height:1;padding:0 5px;opacity:0}
+.chip:hover .chip-x,.chip-x:focus-visible{opacity:1}
+.cell-add{min-height:28px;border:1px dashed var(--line);border-radius:6px;background:transparent;color:var(--muted);font-size:18px;opacity:.45}
+.pcell:hover .cell-add,.cell-add:focus-visible{opacity:1}
+@media (hover:none){.chip-x,.cell-add{opacity:1}}
+
+/* ===== Törzsadatok ===== */
+.subtabs{display:flex;gap:2px;margin-bottom:16px;border-bottom:1px solid var(--line);overflow-x:auto}
+.subtabs button{border:0;border-bottom:3px solid transparent;background:transparent;padding:10px 14px;color:var(--muted);font-weight:600;white-space:nowrap}
+.subtabs button[aria-selected=true]{color:var(--chalk);border-bottom-color:var(--hot)}
+.admin-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:12px}
+.admin-head p{margin:0;max-width:72ch}
+.tbl-wrap{overflow-x:auto}
+.tbl{width:100%;border-collapse:separate;border-spacing:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.tbl th{padding:10px 12px;text-align:left;font-size:13px;font-weight:600;color:var(--muted);background:var(--raised);border-bottom:1px solid var(--line)}
+.tbl td{padding:10px 12px;border-bottom:1px solid rgba(74,85,94,.6);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tr.is-off td{color:var(--muted)}
+.tbl td .swatch{margin-right:8px;vertical-align:-1px}
+.tbl .actions{text-align:right;white-space:nowrap}
+.tbl .actions .btn{margin-left:6px}
+.clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:60ch}
+.link-input{width:100%;min-width:240px;padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--muted);font-size:13px}
+
+/* ===== Modal, űrlap, toast ===== */
+.backdrop{position:fixed;inset:0;z-index:50;display:flex;align-items:flex-start;justify-content:center;padding:6vh 16px;overflow:auto;background:rgba(12,15,17,.64)}
+.modal{width:min(580px,100%);background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,.45)}
+.modal-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.modal-head h2{margin:0;font-family:var(--cond);font-weight:600;font-size:23px;line-height:1.15}
+.icon-btn{width:36px;height:36px;border:0;border-radius:8px;background:transparent;color:var(--muted);font-size:26px;line-height:1}
+.modal-body{display:flex;flex-direction:column;gap:12px;max-height:66vh;overflow:auto;padding:16px 18px}
+.modal-body p{margin:0}
+.modal-foot{display:flex;justify-content:flex-end;gap:10px;padding:12px 18px;border-top:1px solid var(--line)}
+.field{display:flex;flex-direction:column;gap:5px}
+.field>span{font-size:14px;font-weight:600;color:var(--muted)}
+.field input,.field select,.field textarea{min-height:40px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg)}
+.check{display:flex;align-items:center;gap:10px}
+.check input{width:20px;height:20px;accent-color:var(--hot)}
+.form-err{margin:0;color:var(--stop);font-weight:600}
+.task-picker{display:flex;flex-direction:column;gap:12px}
+.tp-group h3{margin:0 0 6px;font-size:14px;font-weight:600;color:var(--muted)}
+.tp-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:6px}
+.tp-item{padding:10px;text-align:left;border:1px solid var(--line);border-left:4px solid var(--c);border-radius:8px;background:var(--raised);font-weight:600}
+.tp-item:hover{border-color:var(--muted);border-left-color:var(--c)}
+.pin-show{margin:0;font-family:var(--cond);font-size:60px;font-weight:700;letter-spacing:.18em;color:var(--hot)}
+.swatches{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.swatch-pick{width:30px;height:30px;border:2px solid transparent;border-radius:6px;background:var(--c)}
+.swatch-pick.is-on{border-color:var(--chalk)}
+input[type=color]{width:44px;height:32px;padding:0;border:1px solid var(--line);border-radius:6px;background:transparent}
+#toast{position:fixed;left:50%;bottom:24px;z-index:60;padding:10px 16px;border-radius:10px;background:var(--chalk);color:var(--bg);font-weight:600;
+  opacity:0;pointer-events:none;transform:translate(-50%,16px);transition:opacity .2s,transform .2s}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+
+/* ===== Bejelentkezés ===== */
+.view-login{display:grid;place-items:center;min-height:100vh}
+.login-box{display:flex;flex-direction:column;gap:12px;width:min(380px,100%);padding:28px;border:1px solid var(--line);border-radius:14px;background:var(--panel)}
+.login-box h1{margin:0;font-family:var(--cond);font-size:34px;line-height:1}
+.login-box p{margin:0}
+
+/* ===== Tablet próba (irodai nézetben) ===== */
+.term-preview{display:grid;grid-template-columns:270px minmax(0,1fr);gap:24px;align-items:start}
+.tp-side{display:flex;flex-direction:column;gap:12px}
+.tp-side p{margin:0}
+.tp-side h2{margin:6px 0 4px;font-size:15px;font-weight:600;color:var(--muted)}
+.pinlist table{width:100%;border-collapse:collapse}
+.pinlist td{padding:5px 0;border-bottom:1px solid var(--line)}
+.pinlist td:last-child{text-align:right;font-family:var(--cond);font-size:19px;font-weight:600;letter-spacing:.08em}
+.tablet{padding:14px;border-radius:28px;background:#171b1e;box-shadow:0 0 0 1px #3c464d,0 20px 50px rgba(0,0,0,.4)}
+.tablet-screen{display:flex;flex-direction:column;aspect-ratio:16/10;min-height:460px;border-radius:14px;overflow:hidden}
+
+/* ===== TABLET (terminál) – kesztyűs kézre méretezve ===== */
+.term-host{container-type:inline-size}
+.term{position:relative;flex:1;display:flex;flex-direction:column;min-height:100%;background:var(--bg);
+  font-size:20px;font-size:clamp(15px,2cqi,26px);user-select:none;-webkit-user-select:none;touch-action:manipulation}
+.term-head{display:flex;align-items:center;justify-content:space-between;gap:1em;padding:.6em 1.1em;background:var(--panel);border-bottom:1px solid var(--line)}
+.term-where{display:flex;flex-direction:column;line-height:1.2}
+.term-where b{font-family:var(--cond);font-size:1.3em;font-weight:600}
+.term-where span{font-size:.8em;color:var(--muted)}
+.term-clock{font-family:var(--cond);font-weight:600;font-size:2.2em;line-height:1}
+.term-body{flex:1;display:flex;flex-direction:column;gap:.8em;min-height:0;padding:1em 1.3em;overflow:auto}
+.term.is-busy .term-body{opacity:.55;pointer-events:none}
+.term-err{position:absolute;left:1em;right:1em;bottom:1em;padding:.6em .9em;border:1px solid var(--stop);border-radius:.6em;background:var(--stop-bg);color:#ffd9d5;font-weight:600}
+.term-fatal{align-items:center;justify-content:center;padding:2em;text-align:center}
+.t-h1{margin:0;font-family:var(--cond);font-weight:700;font-size:2.4em;line-height:1.05}
+.t-h2{margin:0;font-family:var(--cond);font-weight:600;font-size:1.8em;line-height:1.1}
+.t-h3{margin:.3em 0 .5em;font-size:.85em;font-weight:600;color:var(--muted)}
+.t-lead{margin:0;font-size:1.05em;color:var(--muted)}
+.t-link{padding:.45em .9em;border:1px solid var(--line);border-radius:.5em;background:transparent;font-size:.9em;font-weight:600}
+.t-row{display:flex;flex-wrap:wrap;gap:.6em}
+.t-btn{flex:1 1 0;min-height:3.4em;padding:.4em .8em;border:1px solid var(--line);border-radius:.55em;background:var(--raised);font-size:1.1em;font-weight:700;line-height:1.15}
+.t-btn:active,.key:active,.plan-card:active,.t-tile:active{transform:scale(.98)}
+.t-btn:disabled{opacity:.4}
+.t-go{background:var(--go);border-color:var(--go);color:#07210f}
+.t-pause{background:var(--wait);border-color:var(--wait);color:#2a2000}
+.t-block{background:var(--stop);border-color:var(--stop);color:#fff}
+.t-switch{border-color:var(--muted)}
+.t-end{background:transparent;border-color:var(--muted)}
+.t-end-solid{background:var(--chalk);border-color:var(--chalk);color:var(--bg)}
+.t-block-soft{background:var(--stop-bg);border-color:#7a2e28}
+.t-actions{display:grid;grid-template-columns:1fr 1fr;gap:.6em;margin-top:auto}
+.t-actions .t-btn{min-height:3.6em;font-size:1.25em}
+.t-actions.three .t-btn:first-child{grid-column:1/-1}
+
+/* PIN és darabszám */
+.pin-screen,.qty-screen{flex:1;display:grid;grid-template-columns:1fr minmax(0,1fr);align-items:center;gap:1.6em}
+.pin-left{display:flex;flex-direction:column;gap:.6em}
+.pin-dots{display:flex;gap:.6em;margin-top:.5em}
+.pin-dots span{width:1.05em;height:1.05em;border:.14em solid var(--muted);border-radius:50%}
+.pin-dots span.on{background:var(--hot);border-color:var(--hot)}
+.shake{animation:shake .4s}
+@keyframes shake{20%,60%{transform:translateX(-.5em)}40%,80%{transform:translateX(.5em)}}
+.keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:.5em}
+.key{min-height:2.6em;border:1px solid var(--line);border-radius:.45em;background:var(--raised);font-family:var(--cond);font-size:1.7em;font-weight:600}
+.key-fn{font-family:var(--font);font-size:1em;color:var(--muted)}
+.qty-display{font-family:var(--cond);font-size:3.2em;font-weight:700;line-height:1}
+.qty-display span{color:var(--hot)}
+
+/* Személyes képernyő */
+.home-head{display:flex;align-items:center;justify-content:space-between;gap:1em}
+.plan-cards{display:flex;flex-direction:column;gap:.6em}
+.plan-card{display:flex;align-items:stretch;justify-content:space-between;gap:1em;min-height:4.2em;padding:.8em 1em;text-align:left;
+  border:1px solid var(--line);border-left:.45em solid var(--c);border-radius:.6em;background:var(--panel)}
+.pc-main{display:flex;flex-direction:column;gap:.15em;min-width:0}
+.pc-name{font-family:var(--cond);font-weight:700;font-size:1.6em;line-height:1.1}
+.pc-loc{color:var(--muted)}
+.pc-note{font-weight:600}
+.pc-desc{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:.85em;color:var(--muted)}
+.pc-go{align-self:center;flex:none;padding:.7em 1.3em;border-radius:.45em;background:var(--go);color:#07210f;font-size:1.15em;font-weight:700}
+.now-card{display:flex;flex-direction:column;gap:.25em;padding:.9em 1.1em;border:1px solid var(--line);border-left:.45em solid var(--c);border-radius:.6em;background:var(--panel)}
+.now-title{display:flex;align-items:center;flex-wrap:wrap;gap:.4em;font-family:var(--cond);font-weight:700;font-size:1.7em;line-height:1.1}
+.now-title .swatch{width:.55em;height:.55em}
+.now-sub{color:var(--muted)}
+.nc-pause{border-left-color:var(--wait)}
+.nc-block{border-left-color:var(--stop);background:var(--stop-bg)}
+.t-info{margin:0;font-size:.9em;color:var(--muted)}
+.t-info b{color:var(--chalk)}
+
+/* Választók */
+.pick-head{display:flex;align-items:center;gap:1em}
+.pick-scroll{flex:1;min-height:0;overflow:auto}
+.pick-scroll section{margin-bottom:.4em}
+.t-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(11em,1fr));gap:.5em}
+.t-tile{min-height:3.3em;padding:.5em .8em;text-align:left;border:1px solid var(--line);border-left:.4em solid var(--c);border-radius:.5em;background:var(--panel);font-size:1em;font-weight:700}
+.t-reasons{display:grid;grid-template-columns:1fr 1fr;gap:.6em}
+.confirm{display:flex;flex-direction:column;gap:.8em;max-width:32em;margin:auto;text-align:center}
+
+/* Visszaigazolás */
+.done-screen{display:flex;flex-direction:column;align-items:center;gap:.35em;margin:auto;text-align:center}
+.done-check{width:5.2em;height:5.2em;--ok:var(--go)}
+.done-pause .done-check{--ok:var(--wait)}
+.done-block .done-check{--ok:var(--stop)}
+.done-end .done-check{--ok:var(--chalk)}
+.done-check circle{fill:none;stroke:var(--ok);stroke-width:3}
+.done-check path{fill:none;stroke:var(--ok);stroke-width:4;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:40;stroke-dashoffset:40;animation:draw .45s .08s ease-out forwards}
+@keyframes draw{to{stroke-dashoffset:0}}
+.t-bye{margin:.2em 0 .6em;font-size:1.3em;font-weight:600}
+
+/* Kioszk mód: a tablet csak a terminált mutatja */
+body.kiosk .bar{display:none}
+body.kiosk .view{display:flex;flex-direction:column;max-width:none;height:100vh;height:100dvh;padding:0}
+
+/* ===== Reszponzív ===== */
+@container (max-width:640px){
+  .pin-screen,.qty-screen{grid-template-columns:1fr;align-content:start}
+  .t-reasons{grid-template-columns:1fr}
+}
+@media (max-width:980px){
+  .term-preview{grid-template-columns:1fr}
+}
+@media (max-width:860px){
+  .view{padding:16px 14px 48px}
+  .row-main{grid-template-columns:auto 1fr auto;grid-template-areas:"s who btn" "s what what" "s when tot";row-gap:6px}
+  .row-main .stack{grid-area:s;align-self:start}
+  .row-main .who{grid-area:who}
+  .row-main .what{grid-area:what}
+  .row-main .when{grid-area:when;font-size:14px}
+  .row-main .tot{grid-area:tot;text-align:right}
+  .row-main>:last-child{grid-area:btn}
+  .row-detail{grid-template-columns:1fr;padding-left:34px}
+  .admin-head{flex-direction:column}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none !important;transition:none !important}
+  .done-check path{stroke-dashoffset:0}
+}
+</style>
+</head>
+<body>
+<header class="bar" id="bar" hidden></header>
+<main class="view" id="view"><div class="loading">Betöltés…</div></main>
+<div id="modal-root"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+<script>
+/* =====================================================================
+   MUNKAKÖVETÉS – MVP
+   Egyfájlos webalkalmazás: irodai nézetek (élő nézet, heti terv,
+   törzsadatok) + a falra szerelt tablet képernyője.
+   Irodai link:  .../munkakovetes/
+   Tablet link:  .../munkakovetes/?terminal=<tablet azonosító>
+   ===================================================================== */
+(function () {
+'use strict';
+
+/* ---------- Beállítások ---------- */
+const CONFIG = {
+  // Ha a kettő üres, a rendszer DEMÓ módban indul: az adatok csak a böngésző
+  // memóriájában élnek, újratöltéskor visszaállnak a mintára.
+  // Élesítéskor: Supabase → Project Settings → API (Project URL + anon public key).
+  SUPABASE_URL: '',
+  SUPABASE_ANON_KEY: '',
+
+  PIN_LENGTH: 4,
+  SHOW_SATURDAY: true,            // heti tervben hétfő–szombat
+  TERMINAL_IDLE_SECONDS: 45,      // ennyi tétlenség után a tablet visszaáll a PIN képernyőre
+  SHIFT_END_DEFAULT: '14:30',     // irodai lezárásnál ez az alapértelmezett idő korábbi napokra
+  OFF_PLAN_REASONS: ['Vezető kérte', 'Anyaghiány a tervezett munkához', 'Gép vagy eszköz nem elérhető', 'Sürgős munka jött', 'Egyéb'],
+  BLOCK_REASONS: ['Anyaghiány', 'Gép vagy eszköz hiba', 'Hiányzik a rajz vagy az információ', 'Minőségi probléma', 'Egyéb'],
+  TASK_COLORS: ['#ff8f3d', '#5aa9ff', '#c9a27a', '#49b6d6', '#a98bff', '#e58bd1', '#8fb0c8', '#9aa7b0', '#c7cdd1'],
+};
+
+/* ---------- Segédfüggvények ---------- */
+const $ = (sel, el = document) => el.querySelector(sel);
+const $$ = (sel, el = document) => Array.from(el.querySelectorAll(sel));
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const uid = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+  : 'id-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+const pad = n => String(n).padStart(2, '0');
+const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const parseYmd = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const mondayOf = d => { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; };
+const dayIdx = d => (d.getDay() + 6) % 7;               // hétfő = 0
+const DAY_NAMES = ['hétfő', 'kedd', 'szerda', 'csütörtök', 'péntek', 'szombat', 'vasárnap'];
+const capFirst = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+const fmtTime = t => { const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const fmtDateShort = d => d.toLocaleDateString('hu-HU', { month: 'short', day: 'numeric' });
+const fmtDateLong = d => d.toLocaleDateString('hu-HU', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
+const fmtDur = min => { min = Math.max(0, Math.round(min || 0)); const h = Math.floor(min / 60), m = min % 60; return h ? `${h} ó ${m} p` : `${m} p`; };
+const firstName = name => (name || '').trim().split(/\s+/).slice(-1)[0] || name;
+const byId = list => Object.fromEntries((list || []).map(x => [x.id, x]));
+const groupBy = (list, key) => list.reduce((acc, x) => { (acc[x[key]] = acc[x[key]] || []).push(x); return acc; }, {});
+const clone = o => JSON.parse(JSON.stringify(o));
+const byName = (a, b) => a.name.localeCompare(b.name, 'hu');
+const bySortName = (a, b) => ((a.sort || 0) - (b.sort || 0)) || byName(a, b);
+const byTime = (a, b) => Date.parse(a.event_time) - Date.parse(b.event_time);
+const todayKey = () => ymd(new Date());
+
+function groupTasksByLocation(tasks, locations) {
+  const locs = [...locations].sort(bySortName);
+  const out = locs.map(l => [l.name, tasks.filter(t => t.location_id === l.id)]).filter(([, list]) => list.length);
+  const rest = tasks.filter(t => !t.location_id || !locs.some(l => l.id === t.location_id));
+  if (rest.length) out.push(['Egyéb', rest]);
+  out.forEach(([, list]) => list.sort(bySortName));
+  return out;
+}
+
+/* ---------- Állapot számítása az eseménynaplóból ----------
+   Egy dolgozó egy napjának eseményeiből: mit csinál most, mióta,
+   mennyi munkaidő gyűlt össze feladatonként, hány darab készült. */
+const STATE_LABEL = { off: 'Nem jelentkezett be', work: 'Dolgozik', pause: 'Szünet', block: 'Elakadt', done: 'Végzett' };
+
+function summarize(events, isToday, now = Date.now()) {
+  const st = { state: 'off', taskId: null, since: null, offPlan: false, planReason: null, blockReason: null,
+    firstIn: null, lastOut: null, workMin: 0, presentMin: 0, perTask: {}, qty: {}, open: false };
+  let segStart = null, segTask = null, lastT = null;
+  const closeSeg = t => {
+    if (segStart === null) return;
+    const m = Math.max(0, (t - segStart) / 60000);
+    st.workMin += m;
+    st.perTask[segTask] = (st.perTask[segTask] || 0) + m;
+    segStart = null;
+  };
+  for (const e of events) {
+    const t = Date.parse(e.event_time);
+    lastT = t;
+    if (e.type === 'qty') { st.qty[e.task_id] = (st.qty[e.task_id] || 0) + Number(e.quantity || 0); continue; }
+    closeSeg(t);
+    st.since = t;
+    if (e.type === 'start' || e.type === 'resume') {
+      if (e.type === 'start') { st.taskId = e.task_id; st.offPlan = !!e.off_plan; st.planReason = e.reason || null; }
+      else if (e.task_id) st.taskId = e.task_id;
+      if (st.firstIn === null) st.firstIn = t;
+      st.state = 'work'; st.blockReason = null;
+      segStart = t; segTask = st.taskId;
+    } else if (e.type === 'pause') {
+      st.state = 'pause';
+    } else if (e.type === 'block') {
+      st.state = 'block'; st.blockReason = e.reason || null;
+    } else if (e.type === 'end') {
+      st.state = 'done'; st.lastOut = t;
+    }
+  }
+  const active = st.state === 'work' || st.state === 'pause' || st.state === 'block';
+  if (active && isToday) {
+    closeSeg(now);
+    if (st.firstIn !== null) st.presentMin = (now - st.firstIn) / 60000;
+  } else if (active) {
+    st.open = true;                                   // korábbi nap, nem zárta le a műszakot
+    if (st.firstIn !== null) st.presentMin = (lastT - st.firstIn) / 60000;
+  } else if (st.state === 'done' && st.firstIn !== null) {
+    st.presentMin = (st.lastOut - st.firstIn) / 60000;
+  }
+  return st;
+}
+
+/* ---------- Adatréteg: közös mezőlista ---------- */
+const FIELDS = {
+  teams: ['name', 'sort'],
+  locations: ['name', 'sort'],
+  employees: ['name', 'team_id', 'active'],
+  tasks: ['name', 'location_id', 'color', 'description', 'ask_quantity', 'active', 'sort'],
+  terminals: ['name', 'location_id', 'active'],
+};
+function pickFields(table, row) {
+  const out = {};
+  for (const k of FIELDS[table]) if (k in row) out[k] = row[k] === '' ? null : row[k];
+  return out;
+}
+
+/* ---------- DEMÓ adatréteg (memóriában) ---------- */
+function createDemoAdapter() {
+  const db = { teams: [], locations: [], employees: [], tasks: [], terminals: [], assignments: [], events: [], pins: {} };
+  const listeners = new Set();
+  const notify = what => setTimeout(() => listeners.forEach(fn => fn(what)), 0);
+  const DEFAULTS = {
+    teams: { sort: 0 }, locations: { sort: 0 },
+    employees: { active: true, team_id: null },
+    tasks: { active: true, sort: 0, color: '#9aa7b0', ask_quantity: false, description: '', location_id: null },
+    terminals: { active: true, location_id: null },
+  };
+  seedDemo(db);
+
+  const empByPin = pin => db.employees.find(e => e.active && db.pins[e.id] === pin);
+  const checkTerminal = id => {
+    const term = db.terminals.find(t => t.id === id && t.active);
+    if (!term) throw new Error('Ismeretlen vagy kikapcsolt tablet.');
+    return term;
+  };
+
+  return {
+    mode: 'demo',
+    async getSession() { return { user: { email: 'demo' } }; },
+    async signIn() {},
+    async signOut() {},
+    async loadMaster() {
+      return clone({
+        teams: db.teams, locations: db.locations, tasks: db.tasks, terminals: db.terminals,
+        employees: db.employees.map(e => ({ ...e, has_pin: !!db.pins[e.id] })),
+      });
+    },
+    async save(table, row) {
+      const data = pickFields(table, row);
+      let res;
+      if (row.id) { res = db[table].find(r => r.id === row.id); Object.assign(res, data); }
+      else { res = { id: uid(), ...DEFAULTS[table], ...data }; db[table].push(res); }
+      notify('master');
+      return clone(res);
+    },
+    async remove(table, id) {
+      db[table] = db[table].filter(x => x.id !== id);
+      if (table === 'locations') [...db.tasks, ...db.terminals].forEach(x => { if (x.location_id === id) x.location_id = null; });
+      if (table === 'teams') db.employees.forEach(e => { if (e.team_id === id) e.team_id = null; });
+      notify('master');
+    },
+    async setPin(employeeId, manual) {
+      const used = new Set(Object.entries(db.pins).filter(([id]) => id !== employeeId).map(([, p]) => p));
+      let pin = manual;
+      if (pin) {
+        if (!new RegExp(`^\\d{${CONFIG.PIN_LENGTH}}$`).test(pin)) throw new Error(`A PIN ${CONFIG.PIN_LENGTH} számjegyből álljon.`);
+        if (used.has(pin)) throw new Error('Ez a PIN már foglalt, válassz másikat.');
+      } else {
+        do { pin = String(Math.floor(Math.random() * 10 ** CONFIG.PIN_LENGTH)).padStart(CONFIG.PIN_LENGTH, '0'); } while (used.has(pin));
+      }
+      db.pins[employeeId] = pin;
+      notify('master');
+      return pin;
+    },
+    demoPins() {
+      return db.employees.filter(e => e.active && db.pins[e.id]).sort(byName).map(e => ({ name: e.name, pin: db.pins[e.id] }));
+    },
+    async getAssignments(from, to) {
+      return clone(db.assignments.filter(a => a.work_date >= from && a.work_date <= to));
+    },
+    async addAssignments(rows) {
+      for (const r of rows) {
+        const dup = db.assignments.some(a => a.work_date === r.work_date && a.employee_id === r.employee_id && a.task_id === r.task_id);
+        if (!dup) db.assignments.push({ id: uid(), sort: 0, note: null, ...r });
+      }
+      notify('assignments');
+    },
+    async removeAssignment(id) { db.assignments = db.assignments.filter(a => a.id !== id); notify('assignments'); },
+    async getEvents(fromIso, toIso) {
+      const f = Date.parse(fromIso), t = Date.parse(toIso);
+      return clone(db.events.filter(e => { const x = Date.parse(e.event_time); return x >= f && x < t; }).sort(byTime));
+    },
+    async addOfficeEvent(ev) {
+      db.events.push({ id: uid(), terminal_id: null, off_plan: false, reason: null, quantity: null, ...ev });
+      notify('events');
+    },
+    async terminalCatalog(terminalId) {
+      const term = checkTerminal(terminalId);
+      return clone({ terminal: { id: term.id, name: term.name, location_id: term.location_id }, locations: db.locations, tasks: db.tasks });
+    },
+    async terminalIdentify(terminalId, pin) {
+      checkTerminal(terminalId);
+      const emp = empByPin(pin);
+      if (!emp) return null;
+      const day = todayKey(), d0 = parseYmd(day).getTime();
+      return clone({
+        employee: { id: emp.id, name: emp.name },
+        assignments: db.assignments.filter(a => a.employee_id === emp.id && a.work_date === day).map(a => ({ task_id: a.task_id, note: a.note || null })),
+        events: db.events.filter(e => e.employee_id === emp.id && Date.parse(e.event_time) >= d0).sort(byTime),
+      });
+    },
+    async terminalEvent(terminalId, pin, p) {
+      checkTerminal(terminalId);
+      const emp = empByPin(pin);
+      if (!emp) throw new Error('Hibás PIN.');
+      const now = Date.now();
+      const base = { employee_id: emp.id, terminal_id: terminalId, off_plan: false, reason: null, quantity: null, note: null };
+      if (p.quantity != null && p.qtyTask) db.events.push({ ...base, id: uid(), type: 'qty', task_id: p.qtyTask, quantity: p.quantity, event_time: new Date(now - 1).toISOString() });
+      db.events.push({ ...base, id: uid(), type: p.type, task_id: p.task || null, off_plan: !!p.offPlan, reason: p.reason || null, event_time: new Date(now).toISOString() });
+      notify('events');
+      return { ok: true };
+    },
+    subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+  };
+}
+
+function seedDemo(db) {
+  const row = (name, sort) => ({ id: uid(), name, sort });
+  db.teams = [row('Hegesztők', 1), row('Lakatosok', 2), row('Raktár', 3), row('Iroda', 4)];
+  db.locations = [row('1-es csarnok', 1), row('2-es csarnok', 2), row('3-as csarnok', 3), row('Raktár', 4), row('Iroda', 5)];
+  const L = n => (db.locations.find(l => l.name === n) || {}).id || null;
+  const TM = n => (db.teams.find(t => t.name === n) || {}).id || null;
+  const task = (name, loc, color, ask, sort, description = '') => ({ id: uid(), name, location_id: L(loc), color, ask_quantity: ask, active: true, sort, description });
+  db.tasks = [
+    task('Konténerhegesztés', '2-es csarnok', '#ff8f3d', false, 1, 'Varratok a rajz szerint. Hegesztés előtt ellenőrizd a fűzést és a méreteket.'),
+    task('Összeállítás, fűzés', '1-es csarnok', '#5aa9ff', true, 2, 'Összeállítás rajz szerint, a méreteket fűzés előtt ellenőrizd.'),
+    task('Csiszolás, utómunka', '2-es csarnok', '#c9a27a', true, 3),
+    task('Lakatos munka', '1-es csarnok', '#49b6d6', false, 4),
+    task('Robotcella kiszolgálás', '3-as csarnok', '#a98bff', true, 5),
+    task('Anyagmozgatás', 'Raktár', '#e58bd1', false, 6),
+    task('Raktári pakolás', 'Raktár', '#8fb0c8', false, 7),
+    task('Karbantartás', null, '#9aa7b0', false, 8),
+    task('Irodai munka', 'Iroda', '#c7cdd1', false, 9),
+  ];
+  const K = n => db.tasks.find(t => t.name === n).id;
+  const people = [
+    ['Kovács Gábor', 'Hegesztők', '1111', 'Konténerhegesztés', '#214-es konténer'],
+    ['Szabó János', 'Hegesztők', '3333', 'Konténerhegesztés', '#214-es konténer'],
+    ['Varga Bence', 'Hegesztők', '6666', 'Robotcella kiszolgálás', null],
+    ['Nagy Péter', 'Lakatosok', '2222', 'Összeállítás, fűzés', null],
+    ['Horváth Zoltán', 'Lakatosok', '5555', 'Lakatos munka', null],
+    ['Kiss Norbert', 'Lakatosok', '7777', 'Összeállítás, fűzés', null],
+    ['Tóth István', 'Raktár', '4444', 'Raktári pakolás', null],
+    ['Molnár Attila', 'Raktár', '8888', 'Raktári pakolás', null],
+  ];
+  db.employees = people.map(([name, team, pin]) => { const e = { id: uid(), name, team_id: TM(team), active: true }; db.pins[e.id] = pin; return e; });
+  const E = n => db.employees.find(e => e.name === n).id;
+  db.terminals = [
+    { id: 'demo-tablet-1', name: '1-es csarnok tablet', location_id: L('1-es csarnok'), active: true },
+    { id: 'demo-tablet-2', name: '2-es csarnok tablet', location_id: L('2-es csarnok'), active: true },
+    { id: 'demo-tablet-r', name: 'Raktár tablet', location_id: L('Raktár'), active: true },
+  ];
+
+  // Heti beosztás: mindenkinek van alapfeladata, pár nap eltér
+  const today = todayKey();
+  const mon = mondayOf(new Date());
+  const days = Array.from({ length: 6 }, (_, i) => ymd(addDays(mon, i)));
+  if (!days.includes(today)) days.push(today);           // vasárnap is legyen mit mutatni
+  days.forEach((d, i) => people.forEach(([n, , , t, note]) => {
+    const isToday = d === today;
+    if (parseYmd(d).getDay() === 6 && !isToday && !['Kovács Gábor', 'Nagy Péter', 'Tóth István'].includes(n)) return;
+    let tn = t;
+    if (!isToday && i === 2 && n === 'Varga Bence') tn = 'Csiszolás, utómunka';
+    if (!isToday && i === 4 && n === 'Horváth Zoltán') tn = 'Karbantartás';
+    db.assignments.push({ id: uid(), work_date: d, employee_id: E(n), task_id: K(tn), sort: 0, note });
+  }));
+
+  // Mai események – a megnyitás időpontjához igazítva, hogy mindig múltbeliek legyenek
+  const now = Date.now();
+  const six = new Date(); six.setHours(6, 0, 0, 0);
+  const t0 = Math.min(Math.max(six.getTime(), now - 9 * 3600e3), now - 4 * 3600e3);
+  const nowMin = (now - t0) / 60000;
+  const blank = { terminal_id: null, task_id: null, off_plan: false, reason: null, quantity: null, note: null };
+  const ev = (n, type, min, extra) => db.events.push({ id: uid(), employee_id: E(n), ...blank, ...extra, type, event_time: new Date(t0 + min * 60000).toISOString() });
+  const T1 = 'demo-tablet-1', T2 = 'demo-tablet-2', TR = 'demo-tablet-r';
+  ev('Kovács Gábor', 'start', 2, { task_id: K('Konténerhegesztés'), terminal_id: T2 });
+  ev('Kovács Gábor', 'pause', 180, { task_id: K('Konténerhegesztés'), terminal_id: T2 });
+  ev('Kovács Gábor', 'resume', 198, { task_id: K('Konténerhegesztés'), terminal_id: T2 });
+  ev('Szabó János', 'start', 5, { task_id: K('Konténerhegesztés'), terminal_id: T2 });
+  ev('Szabó János', 'block', Math.min(150, nowMin - 20), { task_id: K('Konténerhegesztés'), terminal_id: T2, reason: 'Anyaghiány' });
+  ev('Nagy Péter', 'start', 0, { task_id: K('Összeállítás, fűzés'), terminal_id: T1 });
+  ev('Horváth Zoltán', 'start', 3, { task_id: K('Lakatos munka'), terminal_id: T1 });
+  ev('Horváth Zoltán', 'pause', nowMin - 12, { task_id: K('Lakatos munka'), terminal_id: T1 });
+  ev('Kiss Norbert', 'start', 1, { task_id: K('Összeállítás, fűzés'), terminal_id: T1 });
+  ev('Kiss Norbert', 'qty', 119.9, { task_id: K('Összeállítás, fűzés'), terminal_id: T1, quantity: 14 });
+  ev('Kiss Norbert', 'end', 120, { task_id: K('Összeállítás, fűzés'), terminal_id: T1 });
+  ev('Tóth István', 'start', 8, { task_id: K('Anyagmozgatás'), terminal_id: TR, off_plan: true, reason: 'Vezető kérte' });
+  ev('Molnár Attila', 'start', 4, { task_id: K('Raktári pakolás'), terminal_id: TR });
+  // Varga Bence: be van osztva, de nem jelentkezett be
+
+  // Előző munkanap: teljes napok, Horváth Zoltán elfelejtett kijelentkezni
+  let y = addDays(parseYmd(today), -1);
+  while (y.getDay() === 0 || y.getDay() === 6) y = addDays(y, -1);
+  const yev = (n, type, h, m, extra) => { const d = new Date(y); d.setHours(h, m, 0, 0); db.events.push({ id: uid(), employee_id: E(n), ...blank, ...extra, type, event_time: d.toISOString() }); };
+  people.forEach(([n, , , t], i) => {
+    if (n === 'Varga Bence') return;
+    const tid = K(t), k = i % 5;
+    yev(n, 'start', 6, k, { task_id: tid });
+    yev(n, 'pause', 9, k, { task_id: tid });
+    yev(n, 'resume', 9, 20 + k, { task_id: tid });
+    if (n === 'Horváth Zoltán') return;
+    if (n === 'Nagy Péter') yev(n, 'qty', 14, 29, { task_id: tid, quantity: 36 });
+    yev(n, 'end', 14, 30 + k, { task_id: tid });
+  });
+}
+
+/* ---------- ÉLES adatréteg: Supabase ---------- */
+async function createSupabaseAdapter() {
+  const mod = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
+  const sb = mod.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+  const q = async p => { const { data, error } = await p; if (error) throw new Error(error.message); return data; };
+  const T = t => 'mk_' + t;
+  return {
+    mode: 'live',
+    async getSession() { const { data } = await sb.auth.getSession(); return data.session; },
+    async signIn(email, password) {
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) throw new Error('Hibás e-mail cím vagy jelszó.');
+    },
+    async signOut() { await sb.auth.signOut(); },
+    async loadMaster() {
+      const [teams, locations, employees, tasks, terminals] = await Promise.all([
+        q(sb.from(T('teams')).select('*')),
+        q(sb.from(T('locations')).select('*')),
+        q(sb.from(T('employees')).select('*')),
+        q(sb.from(T('tasks')).select('*')),
+        q(sb.from(T('terminals')).select('*')),
+      ]);
+      return { teams, locations, employees, tasks, terminals };
+    },
+    async save(table, row) {
+      const data = pickFields(table, row);
+      if (row.id) return q(sb.from(T(table)).update(data).eq('id', row.id).select().single());
+      return q(sb.from(T(table)).insert(data).select().single());
+    },
+    async remove(table, id) { await q(sb.from(T(table)).delete().eq('id', id)); },
+    async setPin(employeeId, manual) { return q(sb.rpc('mk_set_pin', { p_employee: employeeId, p_pin: manual || null })); },
+    async getAssignments(from, to) {
+      return q(sb.from(T('assignments')).select('*').gte('work_date', from).lte('work_date', to).order('sort').order('created_at'));
+    },
+    async addAssignments(rows) {
+      if (!rows.length) return;
+      await q(sb.from(T('assignments')).upsert(rows, { onConflict: 'work_date,employee_id,task_id', ignoreDuplicates: true }));
+    },
+    async removeAssignment(id) { await q(sb.from(T('assignments')).delete().eq('id', id)); },
+    async getEvents(fromIso, toIso) {
+      return q(sb.from(T('events')).select('*').gte('event_time', fromIso).lt('event_time', toIso).order('event_time'));
+    },
+    async addOfficeEvent(ev) { await q(sb.from(T('events')).insert(ev)); },
+    async terminalCatalog(terminalId) { return q(sb.rpc('mk_terminal_catalog', { p_terminal: terminalId })); },
+    async terminalIdentify(terminalId, pin) { return q(sb.rpc('mk_terminal_identify', { p_terminal: terminalId, p_pin: pin })); },
+    async terminalEvent(terminalId, pin, p) {
+      return q(sb.rpc('mk_terminal_event', {
+        p_terminal: terminalId, p_pin: pin, p_type: p.type, p_task: p.task || null,
+        p_off_plan: !!p.offPlan, p_reason: p.reason || null,
+        p_qty_task: p.qtyTask || null, p_quantity: p.quantity == null ? null : p.quantity,
+        p_event_time: null,          // MVP: a szerver órája számít
+      }));
+    },
+    subscribe(fn) {
+      const ch = sb.channel('mk-live')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'mk_events' }, () => fn('events'))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'mk_assignments' }, () => fn('assignments'))
+        .subscribe();
+      return () => sb.removeChannel(ch);
+    },
+  };
+}
+
+/* ---------- Alkalmazás állapot ---------- */
+const S = {
+  api: null,
+  session: null,
+  kiosk: false,
+  view: 'live',
+  master: { teams: [], locations: [], employees: [], tasks: [], terminals: [] },
+  live: { date: todayKey(), group: 'location', events: [], assignments: [], open: new Set() },
+  plan: { monday: ymd(mondayOf(new Date())), assignments: [] },
+  admin: { tab: 'employees' },
+  termPreviewId: null,
+  term: null,
+};
+const M = () => ({
+  team: byId(S.master.teams), loc: byId(S.master.locations), emp: byId(S.master.employees),
+  task: byId(S.master.tasks), term: byId(S.master.terminals),
+});
+const reloadMaster = async () => { S.master = await S.api.loadMaster(); };
+const errorBox = e => `<div class="empty"><p>Hiba történt: ${esc(e && e.message || e)}</p><button class="btn" data-act="retry">Újrapróbálás</button></div>`;
+
+/* ---------- Keret és navigáció ---------- */
+const VIEWS = ['live', 'plan', 'admin', 'terminal'];
+
+function renderShell() {
+  const bar = $('#bar');
+  bar.hidden = false;
+  bar.innerHTML = `
+    <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Munkakövetés</span></div>
+    <nav class="tabs" aria-label="Fő menü">
+      <a href="#live" data-nav="live">Élő nézet <span class="badge" id="alert-badge" hidden></span></a>
+      <a href="#plan" data-nav="plan">Heti terv</a>
+      <a href="#admin" data-nav="admin">Törzsadatok</a>
+      <a href="#terminal" data-nav="terminal">Tablet</a>
+    </nav>
+    <div class="bar-end">${S.api.mode === 'demo'
+      ? '<span class="mode" title="Az adatok csak ebben a böngészőben élnek, újratöltéskor visszaállnak.">Demó adatok</span>'
+      : `<span class="muted small">${esc(S.session && S.session.user && S.session.user.email || '')}</span><button class="btn small ghost" data-bar="logout">Kilépés</button>`}</div>`;
+  bar.onclick = async ev => {
+    if (ev.target.closest('[data-bar="logout"]')) { await S.api.signOut(); location.reload(); }
+  };
+}
+
+async function go(view) {
+  if (!VIEWS.includes(view)) view = 'live';
+  S.view = view;
+  $$('#bar [data-nav]').forEach(a => a.setAttribute('aria-current', a.dataset.nav === view ? 'page' : 'false'));
+  stopTerminalTimers();
+  const v = $('#view');
+  v.className = 'view view-' + view;
+  v.innerHTML = '<div class="loading">Betöltés…</div>';
+  try {
+    if (view === 'live') { await loadLive(); renderLive(); }
+    else if (view === 'plan') { await loadPlan(); renderPlan(); }
+    else if (view === 'admin') renderAdmin();
+    else await renderTerminalTab();
+  } catch (e) { v.innerHTML = errorBox(e); }
+}
+
+/* ---------- ÉLŐ NÉZET ---------- */
+async function loadLive() {
+  const d = parseYmd(S.live.date);
+  const [events, assignments] = await Promise.all([
+    S.api.getEvents(d.toISOString(), addDays(d, 1).toISOString()),
+    S.api.getAssignments(S.live.date, S.live.date),
+  ]);
+  S.live.events = events;
+  S.live.assignments = assignments;
+}
+async function reloadLive() { try { await loadLive(); renderLive(); } catch (e) { $('#view').innerHTML = errorBox(e); } }
+
+function liveRows(isToday) {
+  const evBy = groupBy(S.live.events, 'employee_id');
+  const asBy = groupBy(S.live.assignments, 'employee_id');
+  return S.master.employees
+    .map(e => {
+      const ev = evBy[e.id] || [];
+      return { e, ev, st: summarize(ev, isToday), assignments: asBy[e.id] || [] };
+    })
+    .filter(r => r.ev.length || (r.e.active && r.assignments.length));
+}
+
+function rowLocation(r, m) {
+  const task = m.task[r.st.taskId];
+  if (task && task.location_id && m.loc[task.location_id]) return task.location_id;
+  const last = r.ev[r.ev.length - 1];
+  const term = last && m.term[last.terminal_id];
+  if (term && term.location_id && m.loc[term.location_id]) return term.location_id;
+  return '_none';
+}
+
+const STATE_ORDER = { block: 0, work: 1, pause: 2, done: 3, off: 4 };
+
+function renderLive() {
+  const m = M();
+  const today = todayKey();
+  const isToday = S.live.date === today;
+  const rows = liveRows(isToday);
+  const counts = { work: 0, pause: 0, block: 0, done: 0, off: 0 };
+  rows.forEach(r => { counts[r.st.state]++; });
+  const present = rows.filter(r => r.st.state !== 'off');
+  const absent = rows.filter(r => r.st.state === 'off');
+  const blocked = isToday ? rows.filter(r => r.st.state === 'block') : [];
+  const unclosed = isToday ? [] : rows.filter(r => r.st.open);
+
+  const byTeam = S.live.group === 'team';
+  const order = [...(byTeam ? S.master.teams : S.master.locations)].sort(bySortName).map(x => x.id);
+  const keyOf = r => byTeam ? (r.e.team_id && m.team[r.e.team_id] ? r.e.team_id : '_none') : rowLocation(r, m);
+  const groups = new Map();
+  present.forEach(r => { const k = keyOf(r); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); });
+  const rank = k => k === '_none' ? 9999 : (order.indexOf(k) < 0 ? 9998 : order.indexOf(k));
+  const keys = [...groups.keys()].sort((a, b) => rank(a) - rank(b));
+
+  const chip = (cls, label, n) => `<span class="count ${cls}"><i></i>${label} <b>${n}</b></span>`;
+  $('#view').innerHTML = `<section class="live">
+    <div class="toolbar">
+      <div class="datenav">
+        <button class="btn icon" data-act="live-prev" aria-label="Előző nap">‹</button>
+        <input type="date" class="date-input" value="${S.live.date}" max="${today}" data-change="live-date" aria-label="Nap kiválasztása">
+        <button class="btn icon" data-act="live-next" aria-label="Következő nap" ${isToday ? 'disabled' : ''}>›</button>
+        ${isToday ? '' : '<button class="btn" data-act="live-today">Ma</button>'}
+      </div>
+      <h1 class="view-title">${esc(fmtDateLong(parseYmd(S.live.date)))}</h1>
+      <div class="seg" role="group" aria-label="Csoportosítás">
+        <button data-act="live-group" data-v="location" aria-pressed="${!byTeam}">Helyszín szerint</button>
+        <button data-act="live-group" data-v="team" aria-pressed="${byTeam}">Csapat szerint</button>
+      </div>
+    </div>
+    ${blocked.length ? `<div class="alert" role="alert"><div class="alert-stripe" aria-hidden="true"></div><div class="alert-body">
+      <b>${blocked.length === 1 ? 'Elakadás' : blocked.length + ' elakadás'}</b>
+      <ul>${blocked.map(r => `<li>${esc(r.e.name)}: ${esc(r.st.blockReason || 'ok nélkül')}, ${fmtTime(r.st.since)} óta${m.task[r.st.taskId] ? ` (${esc(m.task[r.st.taskId].name)})` : ''}</li>`).join('')}</ul>
+    </div></div>` : ''}
+    <div class="counts">${chip('st-work', 'Dolgozik', counts.work)}${chip('st-pause', 'Szünet', counts.pause)}${chip('st-block', 'Elakadt', counts.block)}${chip('st-done', 'Végzett', counts.done)}${chip('st-off', 'Nem jelentkezett be', counts.off)}</div>
+    ${unclosed.length ? `<p class="warn-line">${unclosed.length} dolgozó nem zárta le a műszakját ezen a napon. Nyisd le a naplóját, és rögzítsd, mikor ment el.</p>` : ''}
+    ${rows.length ? '' : `<div class="empty"><p>${isToday ? 'Ma még senki nem jelentkezett be, és nincs beosztás.' : 'Erre a napra nincs adat.'}</p>${isToday ? '<a class="btn" href="#plan">Heti terv megnyitása</a>' : ''}</div>`}
+    ${keys.map(k => liveGroup(k, groups.get(k), m, isToday)).join('')}
+    ${absent.length ? liveGroup('_absent', absent, m, isToday) : ''}
+  </section>`;
+}
+
+function liveGroup(key, rows, m, isToday) {
+  const byTeam = S.live.group === 'team';
+  const name = key === '_absent' ? (isToday ? 'Beosztva, de még nem jelentkezett be' : 'Beosztva volt, de nem jelentkezett be')
+    : key === '_none' ? (byTeam ? 'Csapat nélkül' : 'Helyszín nélkül')
+    : ((byTeam ? m.team[key] : m.loc[key]) || { name: 'Ismeretlen' }).name;
+  rows.sort((a, b) => (STATE_ORDER[a.st.state] - STATE_ORDER[b.st.state]) || byName(a.e, b.e));
+  return `<section class="group${key === '_absent' ? ' group-absent' : ''}">
+    <h2 class="group-title">${esc(name)} <span class="group-n">${rows.length} fő</span></h2>
+    <div class="rows">${rows.map(r => liveRow(r, m, isToday)).join('')}</div>
+  </section>`;
+}
+
+function liveRow(r, m, isToday) {
+  const { e, st } = r;
+  const task = m.task[st.taskId];
+  const open = S.live.open.has(e.id);
+  let what;
+  if (st.state === 'off') {
+    const names = r.assignments.map(a => (m.task[a.task_id] || {}).name).filter(Boolean);
+    what = `<span class="muted">Beosztás: ${esc(names.join(', ') || 'nincs')}</span>`;
+  } else {
+    const loc = task && m.loc[task.location_id];
+    what = `<span class="swatch" style="--c:${esc(task ? task.color : '#9aa7b0')}"></span><span class="task-name">${esc(task ? task.name : 'Ismeretlen feladat')}</span>`
+      + (loc && S.live.group === 'team' ? `<span class="muted">${esc(loc.name)}</span>` : '')
+      + (st.offPlan ? `<span class="tag tag-offplan">Terven kívül${st.planReason ? ': ' + esc(st.planReason) : ''}</span>` : '')
+      + (st.open ? '<span class="tag tag-warn">Nem zárta le</span>' : '');
+  }
+  const stateText = st.state === 'block' ? `Elakadt: ${st.blockReason || 'ok nélkül'}` : STATE_LABEL[st.state];
+  const when = st.state === 'off' ? '' : st.state === 'done' ? `Távozott ${fmtTime(st.lastOut)}` : `${fmtTime(st.since)} óta`;
+  const tot = st.firstIn !== null ? `<span>Munka ${fmtDur(st.workMin)}</span><span class="muted">Bejött ${fmtTime(st.firstIn)}</span>` : '';
+  return `<article class="row st-${st.state}">
+    <div class="row-main">
+      <span class="stack" aria-hidden="true"><i class="l-red"></i><i class="l-amber"></i><i class="l-green"></i></span>
+      <div class="who"><span class="name">${esc(e.name)}</span><span class="state">${esc(stateText)}</span></div>
+      <div class="what">${what}</div>
+      <div class="when">${when}</div>
+      <div class="tot">${tot}</div>
+      ${st.state === 'off' ? '<span></span>' : `<button class="btn small ghost" data-act="live-toggle" data-emp="${e.id}" aria-expanded="${open}">Napló</button>`}
+    </div>
+    ${open && st.state !== 'off' ? liveDetail(r, m, isToday) : ''}
+  </article>`;
+}
+
+function evText(e, m) {
+  const tn = id => (m.task[id] || { name: 'ismeretlen feladat' }).name;
+  switch (e.type) {
+    case 'start': return `Kezdés: ${tn(e.task_id)}${e.off_plan ? ` (terven kívül${e.reason ? ': ' + e.reason : ''})` : ''}`;
+    case 'resume': return `Folytatás: ${tn(e.task_id)}`;
+    case 'pause': return 'Szünet';
+    case 'block': return `Elakadt: ${e.reason || 'ok nélkül'}`;
+    case 'end': return `Műszak vége${e.note ? ` (${e.note})` : ''}`;
+    case 'qty': return `Darabszám: ${e.quantity} db, ${tn(e.task_id)}`;
+    default: return e.type;
+  }
+}
+
+function liveDetail(r, m, isToday) {
+  const { st, ev } = r;
+  const perTask = Object.entries(st.perTask).sort((a, b) => b[1] - a[1]).map(([tid, min]) => {
+    const t = m.task[tid] || { name: 'Ismeretlen', color: '#9aa7b0' };
+    return `<li><span class="swatch" style="--c:${esc(t.color)}"></span>${esc(t.name)}: <b>${fmtDur(min)}</b>${st.qty[tid] ? `, ${st.qty[tid]} db` : ''}</li>`;
+  }).join('');
+  const planned = r.assignments.map(a => `${esc((m.task[a.task_id] || { name: '?' }).name)}${a.note ? ` (${esc(a.note)})` : ''}`).join(', ');
+  const canClose = ['work', 'pause', 'block'].includes(st.state);
+  return `<div class="row-detail">
+    <div><h3>Napló</h3><ol class="log">${ev.map(e => `<li><time>${fmtTime(e.event_time)}</time><span>${esc(evText(e, m))}</span></li>`).join('')}</ol></div>
+    <div><h3>Feladatonként</h3>
+      <ul class="pertask">${perTask || '<li class="muted">Még nincs rögzített munkaidő.</li>'}</ul>
+      <p class="muted small">Bent töltött idő: ${fmtDur(st.presentMin)}${planned ? `<br>Beosztás: ${planned}` : ''}</p>
+      ${canClose ? `<button class="btn" data-act="live-close" data-emp="${r.e.id}">Műszak lezárása</button>` : ''}
+    </div>
+  </div>`;
+}
+
+function closeShiftModal(empId) {
+  const isToday = S.live.date === todayKey();
+  const r = liveRows(isToday).find(x => x.e.id === empId);
+  if (!r) return;
+  const def = isToday ? fmtTime(Date.now()) : CONFIG.SHIFT_END_DEFAULT;
+  openModal({
+    title: `${r.e.name}: műszak lezárása`,
+    body: `<p>Mikor fejezte be a munkát? A naplóba „irodai lezárás” megjegyzéssel kerül be.</p>
+      <label class="field"><span>Időpont</span><input type="time" id="f-time" value="${def}"></label>`,
+    actions: [{ label: 'Mégse' }, {
+      label: 'Lezárás', primary: true, onClick: async modal => {
+        const v = $('#f-time', modal).value;
+        if (!v) throw new Error('Adj meg időpontot.');
+        const [hh, mm] = v.split(':').map(Number);
+        const d = parseYmd(S.live.date); d.setHours(hh, mm, 0, 0);
+        if (d.getTime() < r.st.since) throw new Error(`Az időpont nem lehet korábbi, mint az utolsó esemény (${fmtTime(r.st.since)}).`);
+        if (d.getTime() > Date.now()) throw new Error('Jövőbeli időpontot nem lehet megadni.');
+        await S.api.addOfficeEvent({ employee_id: r.e.id, type: 'end', task_id: r.st.taskId, note: 'irodai lezárás', event_time: d.toISOString() });
+        toast('Műszak lezárva');
+        await reloadLive();
+      },
+    }],
+  });
+}
+
+async function refreshAlerts() {
+  try {
+    const d0 = parseYmd(todayKey());
+    const ev = await S.api.getEvents(d0.toISOString(), addDays(d0, 1).toISOString());
+    const n = Object.values(groupBy(ev, 'employee_id')).filter(list => summarize(list, true).state === 'block').length;
+    const badge = $('#alert-badge');
+    if (badge) { badge.hidden = !n; badge.textContent = n; badge.title = `${n} elakadás`; }
+  } catch (e) { /* a jelvény nem kritikus */ }
+}
+
+/* ---------- HETI TERV ---------- */
+const planDays = () => {
+  const mon = parseYmd(S.plan.monday);
+  return Array.from({ length: CONFIG.SHOW_SATURDAY ? 6 : 5 }, (_, i) => addDays(mon, i));
+};
+async function loadPlan() {
+  S.plan.assignments = await S.api.getAssignments(S.plan.monday, ymd(addDays(parseYmd(S.plan.monday), 6)));
+}
+async function reloadPlan() { try { await loadPlan(); renderPlan(); } catch (e) { $('#view').innerHTML = errorBox(e); } }
+
+function renderPlan() {
+  const m = M();
+  const days = planDays();
+  const today = todayKey();
+  const asMap = {};
+  S.plan.assignments.forEach(a => { (asMap[a.employee_id + '|' + a.work_date] = asMap[a.employee_id + '|' + a.work_date] || []).push(a); });
+  const emps = S.master.employees.filter(e => e.active);
+  const groups = [...S.master.teams].sort(bySortName).map(t => ({ name: t.name, list: emps.filter(e => e.team_id === t.id) })).filter(g => g.list.length);
+  const noTeam = emps.filter(e => !e.team_id || !m.team[e.team_id]);
+  if (noTeam.length) groups.push({ name: 'Csapat nélkül', list: noTeam });
+  const first = days[0], last = days[days.length - 1];
+  const label = `${first.getFullYear()}. ${fmtDateShort(first)} – ${fmtDateShort(last)}`;
+
+  const cell = (e, d) => {
+    const key = ymd(d);
+    const list = asMap[e.id + '|' + key] || [];
+    return `<div class="pcell${key === today ? ' is-today' : ''}">
+      ${list.map(a => {
+        const t = m.task[a.task_id] || { name: 'Törölt feladat', color: '#9aa7b0' };
+        return `<span class="chip" style="--c:${esc(t.color)}"><span class="chip-text">${esc(t.name)}${a.note ? `<small>${esc(a.note)}</small>` : ''}</span><button class="chip-x" data-act="unassign" data-id="${a.id}" aria-label="${esc(t.name)} törlése">×</button></span>`;
+      }).join('')}
+      <button class="cell-add" data-act="assign" data-emp="${e.id}" data-date="${key}" aria-label="Feladat hozzáadása: ${esc(e.name)}, ${esc(DAY_NAMES[dayIdx(d)])}">+</button>
+    </div>`;
+  };
+
+  $('#view').innerHTML = `<section class="plan">
+    <div class="toolbar">
+      <div class="datenav">
+        <button class="btn icon" data-act="plan-prev" aria-label="Előző hét">‹</button>
+        <button class="btn" data-act="plan-this">Ez a hét</button>
+        <button class="btn icon" data-act="plan-next" aria-label="Következő hét">›</button>
+      </div>
+      <h1 class="view-title">${esc(label)}</h1>
+      <button class="btn" data-act="plan-copy">Előző hét másolása</button>
+    </div>
+    ${emps.length === 0 ? '<div class="empty"><p>Még nincs dolgozó felvéve.</p><a class="btn btn-primary" href="#admin">Dolgozók felvétele</a></div>' : `
+    <div class="pgrid-wrap"><div class="pgrid" style="--days:${days.length}">
+      <div class="phead pcorner">Dolgozó</div>
+      ${days.map(d => `<div class="phead${ymd(d) === today ? ' is-today' : ''}"><b>${capFirst(DAY_NAMES[dayIdx(d)])}</b><span>${esc(fmtDateShort(d))}</span></div>`).join('')}
+      ${groups.map(g => `<div class="pteam">${esc(g.name)}</div>` + g.list.sort(byName).map(e =>
+        `<div class="pname">${esc(e.name)}</div>${days.map(d => cell(e, d)).join('')}`).join('')).join('')}
+    </div></div>`}
+  </section>`;
+}
+
+function assignModal(empId, date) {
+  const e = M().emp[empId];
+  if (!e) return;
+  const d = parseYmd(date);
+  const days = planDays();
+  const tasks = S.master.tasks.filter(t => t.active);
+  const groups = groupTasksByLocation(tasks, S.master.locations);
+  openModal({
+    title: `${e.name}, ${DAY_NAMES[dayIdx(d)]} (${fmtDateShort(d)})`,
+    body: `
+      <label class="field"><span>Megjegyzés (nem kötelező)</span><input type="text" id="f-note" maxlength="120" placeholder="pl. rendelésszám, konténer azonosító"></label>
+      <label class="check"><input type="checkbox" id="f-week"> Ugyanez a hét minden napjára (${days.length === 6 ? 'hétfő–szombat' : 'hétfő–péntek'})</label>
+      ${tasks.length ? `<div class="task-picker">${groups.map(([name, list]) => `<div class="tp-group"><h3>${esc(name)}</h3><div class="tp-list">
+        ${list.map(t => `<button class="tp-item" data-task="${t.id}" style="--c:${esc(t.color)}">${esc(t.name)}</button>`).join('')}</div></div>`).join('')}</div>`
+        : '<p>Még nincs feladat. A Törzsadatok oldalon tudsz felvenni.</p>'}`,
+    onMount: modal => {
+      modal.addEventListener('click', async ev => {
+        const b = ev.target.closest('.tp-item');
+        if (!b || b.disabled) return;
+        const note = $('#f-note', modal).value.trim() || null;
+        const dates = $('#f-week', modal).checked ? days.map(ymd) : [date];
+        b.disabled = true;
+        try {
+          await S.api.addAssignments(dates.map(wd => ({ work_date: wd, employee_id: empId, task_id: b.dataset.task, note })));
+          closeModal(modal);
+          toast(dates.length > 1 ? 'Beosztva a hét minden napjára' : 'Beosztva');
+          await reloadPlan();
+        } catch (err) { showModalError(modal, err); b.disabled = false; }
+      });
+    },
+  });
+}
+
+async function copyPrevWeek() {
+  const mon = parseYmd(S.plan.monday);
+  const prevMon = addDays(mon, -7);
+  const m = M();
+  const prev = (await S.api.getAssignments(ymd(prevMon), ymd(addDays(prevMon, 6))))
+    .filter(a => m.emp[a.employee_id] && m.emp[a.employee_id].active && m.task[a.task_id] && m.task[a.task_id].active);
+  if (!prev.length) { toast('Az előző héten nincs beosztás, nincs mit másolni.'); return; }
+  openModal({
+    title: 'Előző hét másolása',
+    body: `<p>${prev.length} beosztást másolok át az előző hétről (${esc(fmtDateShort(prevMon))} kezdettel) erre a hétre. A meglévő beosztások megmaradnak, ami már szerepel, azt kihagyom.</p>`,
+    actions: [{ label: 'Mégse' }, {
+      label: 'Másolás', primary: true, onClick: async () => {
+        await S.api.addAssignments(prev.map(a => ({ work_date: ymd(addDays(parseYmd(a.work_date), 7)), employee_id: a.employee_id, task_id: a.task_id, note: a.note || null })));
+        toast('Előző hét átmásolva');
+        await reloadPlan();
+      },
+    }],
+  });
+}
+
+/* ---------- TÖRZSADATOK ---------- */
+const ADMIN_TABS = [['employees', 'Dolgozók'], ['tasks', 'Feladatok'], ['locations', 'Helyszínek'], ['teams', 'Csapatok'], ['terminals', 'Tabletek']];
+
+function renderAdmin() {
+  const tab = S.admin.tab;
+  $('#view').innerHTML = `<section class="admin">
+    <div class="toolbar"><h1 class="view-title">Törzsadatok</h1></div>
+    <div class="subtabs" role="tablist">${ADMIN_TABS.map(([k, l]) => `<button role="tab" aria-selected="${k === tab}" data-act="admin-tab" data-v="${k}">${l}</button>`).join('')}</div>
+    <div class="admin-body">${ADMIN_RENDER[tab]()}</div>
+  </section>`;
+}
+
+const toggleBtn = (act, x) => `<button class="btn small ghost" data-act="${act}" data-id="${x.id}">${x.active ? 'Kikapcsolás' : 'Bekapcsolás'}</button>`;
+const offTag = x => x.active ? '' : ' <span class="tag">kikapcsolva</span>';
+
+const ADMIN_RENDER = {
+  employees() {
+    const m = M();
+    const list = [...S.master.employees].sort((a, b) => (Number(b.active) - Number(a.active)) || byName(a, b));
+    return `<div class="admin-head"><p class="muted">A dolgozók a tableten a PIN kódjukkal jelentkeznek be. A kikapcsolt dolgozó nem tud bejelentkezni, de a naplója megmarad.</p>
+      <button class="btn btn-primary" data-act="emp-new">Új dolgozó</button></div>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Név</th><th>Csapat</th><th>PIN</th><th></th></tr></thead><tbody>
+      ${list.map(e => `<tr class="${e.active ? '' : 'is-off'}">
+        <td>${esc(e.name)}${offTag(e)}</td>
+        <td>${esc((m.team[e.team_id] || { name: '–' }).name)}</td>
+        <td>${e.has_pin ? 'Van' : '<span class="tag tag-warn">Nincs</span>'}</td>
+        <td class="actions"><button class="btn small" data-act="emp-edit" data-id="${e.id}">Szerkesztés</button><button class="btn small" data-act="emp-pin" data-id="${e.id}">Új PIN</button>${toggleBtn('emp-toggle', e)}</td>
+      </tr>`).join('')}
+      </tbody></table></div>`;
+  },
+  tasks() {
+    const m = M();
+    const list = [...S.master.tasks].sort((a, b) => (Number(b.active) - Number(a.active)) || bySortName(a, b));
+    return `<div class="admin-head"><p class="muted">Ezeket osztod be a heti tervben, és ezek közül választ a dolgozó a tableten. A leírás a tableten a feladat alatt jelenik meg.</p>
+      <button class="btn btn-primary" data-act="task-new">Új feladat</button></div>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Feladat</th><th>Helyszín</th><th>Darabszám</th><th></th></tr></thead><tbody>
+      ${list.map(t => `<tr class="${t.active ? '' : 'is-off'}">
+        <td><span class="swatch" style="--c:${esc(t.color)}"></span>${esc(t.name)}${offTag(t)}${t.description ? `<div class="muted small clamp">${esc(t.description)}</div>` : ''}</td>
+        <td>${esc((m.loc[t.location_id] || { name: '–' }).name)}</td>
+        <td>${t.ask_quantity ? 'Kéri' : '–'}</td>
+        <td class="actions"><button class="btn small" data-act="task-edit" data-id="${t.id}">Szerkesztés</button>${toggleBtn('task-toggle', t)}</td>
+      </tr>`).join('')}
+      </tbody></table></div>`;
+  },
+  locations() { return simpleList('locations', 'Új helyszín', 'A feladatokhoz és a tabletekhez rendelt helyszínek. Az élő nézet helyszín szerint csoportosít.'); },
+  teams() { return simpleList('teams', 'Új csapat', 'A dolgozók csapatai. A heti terv csapatonként mutatja a dolgozókat.'); },
+  terminals() {
+    const m = M();
+    return `<div class="admin-head"><p class="muted">Minden falra szerelt tabletnek saját linkje van: ezt nyisd meg a tableten kioszk módban. A link bizalmas, mert aki ismeri, PIN-nel be tud jelentkezni róla.</p>
+      <button class="btn btn-primary" data-act="term-new">Új tablet</button></div>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Tablet</th><th>Helyszín</th><th>Link</th><th></th></tr></thead><tbody>
+      ${[...S.master.terminals].sort(byName).map(t => { const url = kioskUrl(t.id); return `<tr class="${t.active ? '' : 'is-off'}">
+        <td>${esc(t.name)}${offTag(t)}</td>
+        <td>${esc((m.loc[t.location_id] || { name: '–' }).name)}</td>
+        <td><input class="link-input" readonly value="${esc(url)}" aria-label="${esc(t.name)} linkje"></td>
+        <td class="actions"><button class="btn small" data-act="term-copy" data-url="${esc(url)}">Link másolása</button><button class="btn small" data-act="term-edit" data-id="${t.id}">Szerkesztés</button>${toggleBtn('term-toggle', t)}</td>
+      </tr>`; }).join('')}
+      </tbody></table></div>`;
+  },
+};
+
+function simpleList(table, newLabel, hint) {
+  const list = [...S.master[table]].sort(bySortName);
+  return `<div class="admin-head"><p class="muted">${hint}</p><button class="btn btn-primary" data-act="simple-new" data-table="${table}">${newLabel}</button></div>
+    <div class="tbl-wrap"><table class="tbl"><tbody>
+    ${list.map(x => `<tr><td>${esc(x.name)}</td><td class="actions"><button class="btn small" data-act="simple-edit" data-table="${table}" data-id="${x.id}">Átnevezés</button><button class="btn small ghost" data-act="simple-del" data-table="${table}" data-id="${x.id}">Törlés</button></td></tr>`).join('')}
+    </tbody></table></div>`;
+}
+
+const kioskUrl = id => `${location.origin}${location.pathname}?terminal=${encodeURIComponent(id)}`;
+
+async function toggleActive(table, id) {
+  const row = S.master[table].find(x => x.id === id);
+  if (!row) return;
+  await S.api.save(table, { id, active: !row.active });
+  await reloadMaster();
+  renderAdmin();
+}
+
+const options = (list, selected, emptyLabel) => `<option value="">${emptyLabel}</option>`
+  + [...list].sort(bySortName).map(x => `<option value="${x.id}" ${x.id === selected ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
+
+function showPin(name, pin) {
+  openModal({
+    title: 'PIN kód',
+    body: `<p>${esc(name)} PIN kódja:</p><p class="pin-show">${esc(pin)}</p><p class="muted small">Add át a dolgozónak. A kód később nem jelenik meg újra, de bármikor adhatsz újat.</p>`,
+    actions: [{ label: 'Rendben', primary: true }],
+  });
+}
+
+function employeeModal(id) {
+  const e = id ? M().emp[id] : { name: '', team_id: (S.master.teams[0] || {}).id || null };
+  openModal({
+    title: id ? 'Dolgozó szerkesztése' : 'Új dolgozó',
+    body: `<label class="field"><span>Név</span><input id="f-name" value="${esc(e.name)}" maxlength="80" placeholder="pl. Kovács Gábor"></label>
+      <label class="field"><span>Csapat</span><select id="f-team">${options(S.master.teams, e.team_id, 'Nincs')}</select></label>
+      ${id ? '' : '<p class="muted small">Mentés után a rendszer PIN kódot ad neki, ezt átadhatod.</p>'}`,
+    actions: [{ label: 'Mégse' }, {
+      label: 'Mentés', primary: true, onClick: async modal => {
+        const name = $('#f-name', modal).value.trim();
+        if (!name) throw new Error('Add meg a nevet.');
+        const saved = await S.api.save('employees', { id, name, team_id: $('#f-team', modal).value || null });
+        const pin = id ? null : await S.api.setPin(saved.id);
+        await reloadMaster();
+        renderAdmin();
+        if (pin) setTimeout(() => showPin(saved.name, pin), 0);
+      },
+    }],
+  });
+}
+
+function pinModal(id) {
+  const e = M().emp[id];
+  openModal({
+    title: `Új PIN: ${e.name}`,
+    body: `<p>A régi PIN azonnal érvényét veszti.</p>
+      <label class="field"><span>Saját PIN (nem kötelező)</span><input id="f-pin" inputmode="numeric" maxlength="${CONFIG.PIN_LENGTH}" autocomplete="off" placeholder="üresen hagyva véletlen kódot kap"></label>`,
+    actions: [{ label: 'Mégse' }, {
+      label: 'PIN kiadása', primary: true, onClick: async modal => {
+        const v = $('#f-pin', modal).value.trim();
+        if (v && !new RegExp(`^\\d{${CONFIG.PIN_LENGTH}}$`).test(v)) throw new Error(`A PIN ${CONFIG.PIN_LENGTH} számjegyből álljon.`);
+        const pin = await S.api.setPin(id, v || null);
+        await reloadMaster();
+        renderAdmin();
+        setTimeout(() => showPin(e.name, pin), 0);
+      },
+    }],
+  });
+}
+
+function taskModal(id) {
+  const t = id ? M().task[id] : { name: '', location_id: null, color: CONFIG.TASK_COLORS[0], description: '', ask_quantity: false };
+  openModal({
+    title: id ? 'Feladat szerkesztése' : 'Új feladat',
+    body: `<label class="field"><span>Megnevezés</span><input id="f-name" value="${esc(t.name)}" maxlength="80" placeholder="pl. Konténerhegesztés"></label>
+      <label class="field"><span>Helyszín</span><select id="f-loc">${options(S.master.locations, t.location_id, 'Nincs megadva')}</select></label>
+      <div class="field"><span>Szín</span><div class="swatches">
+        ${CONFIG.TASK_COLORS.map(c => `<button type="button" class="swatch-pick${c === t.color ? ' is-on' : ''}" data-color="${c}" style="--c:${c}" aria-label="Szín ${c}"></button>`).join('')}
+        <input type="color" id="f-color" value="${esc(t.color)}" aria-label="Egyedi szín"></div></div>
+      <label class="field"><span>Leírás, információ a dolgozónak</span><textarea id="f-desc" rows="3" maxlength="600">${esc(t.description || '')}</textarea></label>
+      <label class="check"><input type="checkbox" id="f-qty" ${t.ask_quantity ? 'checked' : ''}> Feladatváltáskor és műszak végén kérdezze meg a darabszámot</label>`,
+    onMount: modal => modal.addEventListener('click', ev => {
+      const b = ev.target.closest('.swatch-pick');
+      if (!b) return;
+      $$('.swatch-pick', modal).forEach(x => x.classList.toggle('is-on', x === b));
+      $('#f-color', modal).value = b.dataset.color;
+    }),
+    actions: [{ label: 'Mégse' }, {
+      label: 'Mentés', primary: true, onClick: async modal => {
+        const name = $('#f-name', modal).value.trim();
+        if (!name) throw new Error('Add meg a feladat nevét.');
+        await S.api.save('tasks', {
+          id, name, location_id: $('#f-loc', modal).value || null, color: $('#f-color', modal).value,
+          description: $('#f-desc', modal).value.trim(), ask_quantity: $('#f-qty', modal).checked,
+        });
+        await reloadMaster();
+        renderAdmin();
+      },
+    }],
+  });
+}
+
+function simpleModal(table, id) {
+  const word = table === 'locations' ? 'helyszín' : 'csapat';
+  const row = id ? S.master[table].find(x => x.id === id) : { name: '' };
+  openModal({
+    title: id ? `${capFirst(word)} átnevezése` : `Új ${word}`,
+    body: `<label class="field"><span>Név</span><input id="f-name" value="${esc(row.name)}" maxlength="60"></label>`,
+    actions: [{ label: 'Mégse' }, {
+      label: 'Mentés', primary: true, onClick: async modal => {
+        const name = $('#f-name', modal).value.trim();
+        if (!name) throw new Error('Add meg a nevet.');
+        if (S.master[table].some(x => x.id !== id && x.name.toLowerCase() === name.toLowerCase())) throw new Error('Ilyen nevű már van.');
+        await S.api.save(table, id ? { id, name } : { name, sort: S.master[table].length + 1 });
+        await reloadMaster();
+        renderAdmin();
+      },
+    }],
+  });
+}
+
+function simpleDelete(table, id) {
+  const row = S.master[table].find(x => x.id === id);
+  if (!row) return;
+  openModal({
+    title: `${row.name} törlése`,
+    body: `<p>${table === 'locations' ? 'A hozzá tartozó feladatoknál és tableteknél a helyszín üres lesz.' : 'A csapat dolgozói csapat nélkül maradnak.'} A naplóból nem vész el semmi.</p>`,
+    actions: [{ label: 'Mégse' }, {
+      label: 'Törlés', danger: true, onClick: async () => { await S.api.remove(table, id); await reloadMaster(); renderAdmin(); },
+    }],
+  });
+}
+
+function terminalModal(id) {
+  const row = id ? S.master.terminals.find(x => x.id === id) : { name: '', location_id: null };
+  openModal({
+    title: id ? 'Tablet szerkesztése' : 'Új tablet',
+    body: `<label class="field"><span>Név</span><input id="f-name" value="${esc(row.name)}" maxlength="60" placeholder="pl. 2-es csarnok tablet"></label>
+      <label class="field"><span>Helyszín</span><select id="f-loc">${options(S.master.locations, row.location_id, 'Nincs megadva')}</select></label>`,
+    actions: [{ label: 'Mégse' }, {
+      label: 'Mentés', primary: true, onClick: async modal => {
+        const name = $('#f-name', modal).value.trim();
+        if (!name) throw new Error('Add meg a tablet nevét.');
+        await S.api.save('terminals', { id, name, location_id: $('#f-loc', modal).value || null });
+        await reloadMaster();
+        renderAdmin();
+      },
+    }],
+  });
+}
+
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); toast('Link a vágólapon'); }
+  catch (e) { toast('Nem sikerült másolni. Jelöld ki a linket, és másold ki kézzel.'); }
+}
+
+/* ---------- TABLET (terminál) ----------
+   Képernyők: pin → home → (pick / reason / qty / confirm) → done → pin
+   A tablet állapotot nem tárol: minden gombnyomás után a szerver
+   eseménynaplójából számolja újra, hol tart a dolgozó. */
+
+async function renderTerminalTab() {
+  const terms = S.master.terminals.filter(t => t.active).sort(byName);
+  if (!terms.some(t => t.id === S.termPreviewId)) S.termPreviewId = (terms.find(t => /2/.test(t.name)) || terms[0] || {}).id || null;
+  const pins = S.api.mode === 'demo' ? S.api.demoPins() : null;
+  $('#view').innerHTML = `<section class="term-preview">
+    <aside class="tp-side">
+      <h1 class="view-title">Tablet próba</h1>
+      <p>Ezt látja a dolgozó a falra szerelt tableten. Élesben a tablet kioszk módban csak ezt a képernyőt mutatja, a saját linkjéről.</p>
+      <label class="field"><span>Melyik tablet?</span><select data-change="term-select">${terms.map(t => `<option value="${t.id}" ${t.id === S.termPreviewId ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></label>
+      ${pins ? `<div class="pinlist"><h2>Demó PIN kódok</h2><table>${pins.map(p => `<tr><td>${esc(p.name)}</td><td>${esc(p.pin)}</td></tr>`).join('')}</table></div>
+        <p class="muted small">Próbáld ki: Szabó János (3333) anyaghiány miatt elakadt. Oldd fel az elakadást a tableten, aztán nézd meg az Élő nézetet. A PIN-t a billentyűzetről is beírhatod.</p>` : ''}
+    </aside>
+    <div class="tablet"><div class="tablet-screen term-host" id="term-root"></div></div>
+  </section>`;
+  if (S.termPreviewId) await startTerminal(S.termPreviewId, $('#term-root'));
+  else $('#term-root').innerHTML = '<div class="term term-fatal"><p>Nincs aktív tablet. A Törzsadatok oldal Tabletek fülén tudsz felvenni.</p></div>';
+}
+
+function stopTerminalTimers() {
+  const t = S.term;
+  if (!t) return;
+  Object.values(t.timers).forEach(x => { clearInterval(x); clearTimeout(x); });
+  t.timers = {};
+}
+
+async function startTerminal(terminalId, el) {
+  stopTerminalTimers();
+  S.term = { id: terminalId, el, cat: null, screen: 'pin', pin: '', ses: null, flow: null, busy: false, err: null, done: null, shake: false, timers: {} };
+  el.onclick = onTermClick;
+  try {
+    S.term.cat = await S.api.terminalCatalog(terminalId);
+  } catch (e) {
+    el.innerHTML = `<div class="term term-fatal"><p>${esc(friendlyErr(e))}</p><p class="muted">Ellenőrizd a tablet linkjét a Törzsadatok oldal Tabletek fülén.</p></div>`;
+    return;
+  }
+  renderTerm();
+  const t = S.term;
+  t.timers.clock = setInterval(() => { const c = t.el.querySelector('.term-clock'); if (c) c.textContent = fmtTime(Date.now()); }, 5000);
+  if (S.kiosk) t.timers.catalog = setInterval(async () => { try { t.cat = await S.api.terminalCatalog(terminalId); } catch (e) { /* következő körben újra */ } }, 10 * 60000);
+}
+
+const greeting = () => { const h = new Date().getHours(); return h < 9 ? 'Jó reggelt!' : h < 18 ? 'Jó napot!' : 'Jó estét!'; };
+const friendlyErr = e => {
+  const msg = (e && e.message) || String(e);
+  return /fetch|network|Load failed/i.test(msg) ? 'Nincs kapcsolat a szerverrel. Ellenőrizd a wifit, és próbáld újra.' : msg;
+};
+const tTask = id => S.term.cat.tasks.find(x => x.id === id);
+const tLocName = task => { const l = task && S.term.cat.locations.find(x => x.id === task.location_id); return l ? l.name : ''; };
+const tStatus = () => summarize(S.term.ses.events, true);
+
+function renderTerm() {
+  const t = S.term;
+  if (!t || !t.el || !t.el.isConnected || !t.cat) return;
+  const loc = S.term.cat.locations.find(l => l.id === t.cat.terminal.location_id);
+  const screens = { pin: termPin, home: termHome, pick: termPick, reason: termReason, qty: termQty, confirm: termConfirm, done: termDone };
+  t.el.innerHTML = `<div class="term${t.busy ? ' is-busy' : ''}">
+    <header class="term-head">
+      <div class="term-where"><b>${esc(loc ? loc.name : t.cat.terminal.name)}</b><span>${esc(capFirst(new Date().toLocaleDateString('hu-HU', { weekday: 'long', month: 'long', day: 'numeric' })))}</span></div>
+      <div class="term-clock">${fmtTime(Date.now())}</div>
+    </header>
+    <div class="term-body">${screens[t.screen]()}</div>
+    ${t.err ? `<div class="term-err" role="alert">${esc(t.err)}</div>` : ''}
+  </div>`;
+}
+
+const keypad = (digit, clear, back) => `<div class="keypad">${['1', '2', '3', '4', '5', '6', '7', '8', '9'].map(k => `<button class="key" data-t="${digit}" data-v="${k}">${k}</button>`).join('')}
+  <button class="key key-fn" data-t="${clear}">Törlés</button><button class="key" data-t="${digit}" data-v="0">0</button><button class="key key-fn" data-t="${back}" aria-label="Utolsó számjegy törlése">⌫</button></div>`;
+
+function termPin() {
+  const t = S.term;
+  const dots = Array.from({ length: CONFIG.PIN_LENGTH }, (_, i) => `<span class="${i < t.pin.length ? 'on' : ''}"></span>`).join('');
+  return `<div class="pin-screen">
+    <div class="pin-left">
+      <h1 class="t-h1">${greeting()}</h1>
+      <p class="t-lead">Írd be a PIN kódod</p>
+      <div class="pin-dots${t.shake ? ' shake' : ''}" aria-label="${t.pin.length} számjegy beírva">${dots}</div>
+    </div>
+    ${keypad('digit', 'clear', 'back')}
+  </div>`;
+}
+
+function termHome() {
+  const { ses } = S.term;
+  const st = tStatus();
+  const cur = tTask(st.taskId);
+  const fn = firstName(ses.employee.name);
+  const planned = ses.assignments.filter(a => tTask(a.task_id));
+  const head = `<div class="home-head"><h1 class="t-h1">Szia, ${esc(fn)}!</h1><button class="t-link" data-t="reset">Kilépés</button></div>`;
+
+  if (st.state === 'off' || st.state === 'done') {
+    const intro = st.state === 'done'
+      ? `A mai műszakot ${fmtTime(st.lastOut)}-kor lezártad. Ha újra munkába állsz, válaszd ki a feladatot.`
+      : planned.length ? 'A mai beosztásod:' : 'Mára nincs beosztásod. Válaszd ki, min dolgozol.';
+    return `${head}<p class="t-lead">${intro}</p>
+      <div class="plan-cards">${planned.map(a => {
+        const task = tTask(a.task_id);
+        return `<button class="plan-card" data-t="start-planned" data-task="${task.id}" style="--c:${esc(task.color)}">
+          <span class="pc-main"><span class="pc-name">${esc(task.name)}</span>
+            ${tLocName(task) ? `<span class="pc-loc">${esc(tLocName(task))}</span>` : ''}
+            ${a.note ? `<span class="pc-note">${esc(a.note)}</span>` : ''}
+            ${task.description ? `<span class="pc-desc">${esc(task.description)}</span>` : ''}</span>
+          <span class="pc-go">Kezdés</span></button>`;
+      }).join('')}</div>
+      <div class="t-row"><button class="t-btn" data-t="other">${planned.length ? 'Mást csinálok' : 'Feladat kiválasztása'}</button></div>`;
+  }
+
+  const since = fmtTime(st.since);
+  const color = esc(cur ? cur.color : '#9aa7b0');
+  const taskTitle = cur ? `<span class="swatch" style="--c:${color}"></span>${esc(cur.name)}` : 'Ismeretlen feladat';
+  if (st.state === 'work') {
+    const a = ses.assignments.find(x => x.task_id === st.taskId);
+    const info = [a && a.note ? `<b>${esc(a.note)}</b>` : '', cur && cur.description ? esc(cur.description) : ''].filter(Boolean).join(' ');
+    return `${head}
+      <div class="now-card" style="--c:${color}"><span class="now-title">${taskTitle}</span>
+        <span class="now-sub">${tLocName(cur) ? esc(tLocName(cur)) + ', ' : ''}${since} óta. Ma eddig ${fmtDur(st.workMin)} munka.</span></div>
+      ${info ? `<p class="t-info">${info}</p>` : ''}
+      <div class="t-actions">
+        <button class="t-btn t-switch" data-t="switch">Feladatváltás</button>
+        <button class="t-btn t-pause" data-t="pause">Szünet</button>
+        <button class="t-btn t-block" data-t="block">Elakadtam</button>
+        <button class="t-btn t-end" data-t="end">Műszak vége</button>
+      </div>`;
+  }
+  if (st.state === 'pause') {
+    return `${head}
+      <div class="now-card nc-pause"><span class="now-title">Szüneten vagy</span>
+        <span class="now-sub">${since} óta. Utána ezt folytatod: ${esc(cur ? cur.name : '')}</span></div>
+      <div class="t-actions">
+        <button class="t-btn t-go" data-t="resume">Folytatom a munkát</button>
+        <button class="t-btn t-end" data-t="end">Műszak vége</button>
+      </div>`;
+  }
+  return `${head}
+    <div class="now-card nc-block"><span class="now-title">Elakadás jelezve: ${esc(st.blockReason || 'ok nélkül')}</span>
+      <span class="now-sub">${since} óta. Az iroda látja a jelzést. Feladat: ${esc(cur ? cur.name : '')}</span></div>
+    <div class="t-actions three">
+      <button class="t-btn t-go" data-t="resume">Megoldódott, folytatom</button>
+      <button class="t-btn t-switch" data-t="switch">Feladatváltás</button>
+      <button class="t-btn t-end" data-t="end">Műszak vége</button>
+    </div>`;
+}
+
+function termPick() {
+  const t = S.term;
+  const exclude = t.flow.kind === 'switch' ? tStatus().taskId : null;
+  const tasks = t.cat.tasks.filter(x => x.active !== false && x.id !== exclude);
+  const planned = t.ses.assignments.map(a => tasks.find(x => x.id === a.task_id)).filter(Boolean);
+  const tile = x => `<button class="t-tile" data-t="pick" data-task="${x.id}" style="--c:${esc(x.color)}">${esc(x.name)}</button>`;
+  return `<div class="pick-head"><button class="t-link" data-t="home">Vissza</button><h2 class="t-h2">${t.flow.kind === 'switch' ? 'Mire váltasz?' : 'Min dolgozol?'}</h2></div>
+    <div class="pick-scroll">
+      ${planned.length ? `<section><h3 class="t-h3">A mai beosztásodból</h3><div class="t-tiles">${planned.map(tile).join('')}</div></section>` : ''}
+      ${groupTasksByLocation(tasks, t.cat.locations).map(([name, list]) => `<section><h3 class="t-h3">${esc(name)}</h3><div class="t-tiles">${list.map(tile).join('')}</div></section>`).join('')}
+    </div>`;
+}
+
+function termReason() {
+  const f = S.term.flow;
+  const isBlock = f.kind === 'block';
+  const task = f.task && tTask(f.task);
+  return `<div class="pick-head"><button class="t-link" data-t="home">Vissza</button><h2 class="t-h2">${isBlock ? 'Mi a gond?' : 'Miért ezt csinálod?'}</h2></div>
+    ${!isBlock && task ? `<p class="t-lead">${esc(task.name)} nincs a mai beosztásodban. Egy érintés, és rögzítem.</p>` : ''}
+    <div class="t-reasons">${(isBlock ? CONFIG.BLOCK_REASONS : CONFIG.OFF_PLAN_REASONS).map(r =>
+      `<button class="t-btn${isBlock ? ' t-block-soft' : ''}" data-t="reason" data-v="${esc(r)}">${esc(r)}</button>`).join('')}</div>`;
+}
+
+function termQty() {
+  const f = S.term.flow;
+  const task = tTask(f.qtyTask);
+  return `<div class="qty-screen">
+    <div class="pin-left">
+      <h2 class="t-h2">Hány darab készült?</h2>
+      <p class="t-lead">${esc(task ? task.name : '')}, mióta elkezdted.</p>
+      <div class="qty-display"><span>${esc(f.qtyInput || '0')}</span> db</div>
+      <div class="t-row">
+        <button class="t-btn" data-t="qty-skip">Kihagyom</button>
+        <button class="t-btn t-go" data-t="qty-ok" ${f.qtyInput ? '' : 'disabled'}>Rögzítés</button>
+      </div>
+    </div>
+    ${keypad('qdigit', 'qclear', 'qback')}
+  </div>`;
+}
+
+function termConfirm() {
+  const st = tStatus();
+  return `<div class="confirm">
+    <h2 class="t-h2">Lezárod a mai műszakot?</h2>
+    <p class="t-lead">Ma eddig ${fmtDur(st.workMin)} munkát rögzítettél.</p>
+    <div class="t-row"><button class="t-btn" data-t="home">Mégse</button><button class="t-btn t-end-solid" data-t="confirm-end">Igen, lezárom</button></div>
+  </div>`;
+}
+
+function termDone() {
+  const d = S.term.done;
+  return `<div class="done-screen done-${d.kind}">
+    <svg class="done-check" viewBox="0 0 52 52" aria-hidden="true"><circle cx="26" cy="26" r="24"/><path d="M14 27l8 8 16-17"/></svg>
+    <h1 class="t-h1">${esc(d.title)}</h1>
+    <p class="t-lead">${esc(d.sub)}</p>
+    <p class="t-bye">${esc(d.bye)}</p>
+    <button class="t-link" data-t="reset">Kész</button>
+  </div>`;
+}
+
+/* --- Tablet események --- */
+function bumpIdle() {
+  const t = S.term;
+  if (!t) return;
+  clearTimeout(t.timers.idle);
+  const idle = (t.screen === 'pin' && !t.pin) || t.screen === 'done';
+  if (!idle) t.timers.idle = setTimeout(termReset, CONFIG.TERMINAL_IDLE_SECONDS * 1000);
+}
+
+function termReset() {
+  const t = S.term;
+  if (!t) return;
+  clearTimeout(t.timers.idle);
+  clearTimeout(t.timers.done);
+  Object.assign(t, { screen: 'pin', pin: '', ses: null, flow: null, busy: false, err: null, done: null, shake: false });
+  renderTerm();
+}
+
+function termGo(screen) { const t = S.term; t.screen = screen; t.err = null; renderTerm(); bumpIdle(); }
+
+async function termDigit(d) {
+  const t = S.term;
+  if (t.busy || t.screen !== 'pin' || t.pin.length >= CONFIG.PIN_LENGTH) return;
+  t.pin += d; t.err = null; t.shake = false;
+  bumpIdle();
+  if (t.pin.length < CONFIG.PIN_LENGTH) return renderTerm();
+  t.busy = true; renderTerm();
+  try {
+    const ses = await S.api.terminalIdentify(t.id, t.pin);
+    t.busy = false;
+    if (!ses) { t.pin = ''; t.err = 'Nincs ilyen PIN kód. Próbáld újra.'; t.shake = true; renderTerm(); return; }
+    t.ses = ses; t.flow = null;
+    termGo('home');
+  } catch (e) { t.busy = false; t.pin = ''; t.err = friendlyErr(e); renderTerm(); }
+}
+
+function qtyDigit(d) {
+  const f = S.term.flow;
+  if ((f.qtyInput || '').length >= 5) return;
+  f.qtyInput = ((f.qtyInput || '') + d).replace(/^0+(?=\d)/, '');
+  renderTerm();
+}
+
+function beginWithQty(kind, nextScreen) {
+  const st = tStatus();
+  const task = tTask(st.taskId);
+  S.term.flow = { kind, qtyTask: task && task.ask_quantity ? task.id : null, qtyInput: '', quantity: null };
+  termGo(S.term.flow.qtyTask ? 'qty' : nextScreen);
+}
+
+function afterQty() {
+  const f = S.term.flow;
+  if (f.kind === 'switch') return termGo('pick');
+  return termSend({ type: 'end', task: tStatus().taskId });
+}
+
+function onPick(taskId) {
+  const t = S.term;
+  t.flow.task = taskId;
+  const planned = t.ses.assignments.map(a => a.task_id);
+  if (planned.includes(taskId)) return termSend({ type: 'start', task: taskId });
+  if (!planned.length) return termSend({ type: 'start', task: taskId, offPlan: true, reason: 'Nem volt beosztás' });
+  termGo('reason');
+}
+
+async function termSend(p) {
+  const t = S.term;
+  const f = t.flow || {};
+  const payload = { ...p };
+  if (f.qtyTask && f.quantity != null) { payload.qtyTask = f.qtyTask; payload.quantity = f.quantity; }
+  t.busy = true; t.err = null; renderTerm();
+  try {
+    await S.api.terminalEvent(t.id, t.pin, payload);
+    const task = tTask(payload.task);
+    const fn = firstName(t.ses.employee.name);
+    const time = fmtTime(Date.now());
+    const wd = new Date().getDay();
+    const texts = {
+      start: ['Kezdés rögzítve', `${task ? task.name + ', ' : ''}${time}`, `Jó munkát, ${fn}!`],
+      pause: ['Szünet rögzítve', time, 'Jó pihenést!'],
+      resume: ['Folytatás rögzítve', `${task ? task.name + ', ' : ''}${time}`, `Hajrá, ${fn}!`],
+      block: ['Elakadás jelezve', `${payload.reason}, ${time}`, 'Az iroda látja a jelzést.'],
+      end: ['Műszak lezárva', time, wd === 5 || wd === 6 ? `Jó hétvégét, ${fn}!` : `Viszlát, ${fn}!`],
+    };
+    const [title, sub, bye] = texts[payload.type];
+    Object.assign(t, { busy: false, flow: null, done: { kind: payload.type, title, sub, bye } });
+    termGo('done');
+    t.timers.done = setTimeout(termReset, 4000);
+  } catch (e) { t.busy = false; t.err = friendlyErr(e); renderTerm(); }
+}
+
+function onTermClick(ev) {
+  const t = S.term;
+  if (!t || !t.cat) return;
+  const b = ev.target.closest('[data-t]');
+  if (!b || b.disabled) { if (t.screen === 'done') termReset(); return; }
+  if (t.busy) return;
+  bumpIdle();
+  const f = t.flow;
+  switch (b.dataset.t) {
+    case 'digit': return termDigit(b.dataset.v);
+    case 'clear': t.pin = ''; t.err = null; return renderTerm();
+    case 'back': t.pin = t.pin.slice(0, -1); return renderTerm();
+    case 'reset': return termReset();
+    case 'home': t.flow = null; return termGo('home');
+    case 'start-planned': t.flow = null; return termSend({ type: 'start', task: b.dataset.task });
+    case 'other': t.flow = { kind: 'start' }; return termGo('pick');
+    case 'switch': return beginWithQty('switch', 'pick');
+    case 'end': return beginWithQty('end', 'confirm');
+    case 'pause': t.flow = null; return termSend({ type: 'pause', task: tStatus().taskId });
+    case 'resume': t.flow = null; return termSend({ type: 'resume', task: tStatus().taskId });
+    case 'block': t.flow = { kind: 'block' }; return termGo('reason');
+    case 'pick': return onPick(b.dataset.task);
+    case 'reason':
+      return f.kind === 'block'
+        ? termSend({ type: 'block', task: tStatus().taskId, reason: b.dataset.v })
+        : termSend({ type: 'start', task: f.task, offPlan: true, reason: b.dataset.v });
+    case 'qdigit': return qtyDigit(b.dataset.v);
+    case 'qclear': f.qtyInput = ''; return renderTerm();
+    case 'qback': f.qtyInput = (f.qtyInput || '').slice(0, -1); return renderTerm();
+    case 'qty-skip': f.quantity = null; return afterQty();
+    case 'qty-ok': f.quantity = Number(f.qtyInput); return afterQty();
+    case 'confirm-end': return termSend({ type: 'end', task: tStatus().taskId });
+  }
+}
+
+/* ---------- Modal és toast ---------- */
+let currentModal = null;
+
+function openModal({ title, body, actions = [], onMount }) {
+  const root = $('#modal-root');
+  root.innerHTML = `<div class="backdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="m-title">
+    <header class="modal-head"><h2 id="m-title">${esc(title)}</h2><button class="icon-btn" data-mclose aria-label="Bezárás">×</button></header>
+    <div class="modal-body">${body}<p class="form-err" hidden></p></div>
+    ${actions.length ? `<footer class="modal-foot">${actions.map((a, i) => `<button class="btn${a.primary ? ' btn-primary' : ''}${a.danger ? ' btn-danger' : ''}" data-mact="${i}">${esc(a.label)}</button>`).join('')}</footer>` : ''}
+  </div></div>`;
+  const backdrop = root.firstElementChild;
+  const modal = backdrop.firstElementChild;
+  currentModal = modal;
+  backdrop.addEventListener('click', async ev => {
+    if (ev.target === backdrop || ev.target.closest('[data-mclose]')) return closeModal(modal);
+    const ab = ev.target.closest('[data-mact]');
+    if (!ab || ab.disabled) return;
+    const a = actions[Number(ab.dataset.mact)];
+    if (!a.onClick) return closeModal(modal);
+    ab.disabled = true;
+    try { const r = await a.onClick(modal); if (r !== false) closeModal(modal); }
+    catch (err) { showModalError(modal, err); ab.disabled = false; }
+  });
+  if (onMount) onMount(modal);
+  const first = modal.querySelector('.modal-body input:not([type=checkbox]):not([type=color]), .modal-body select, .modal-body textarea, .modal-foot .btn-primary');
+  if (first) first.focus();
+  return modal;
+}
+
+function closeModal(modal) {
+  if (modal && modal !== currentModal) return;
+  $('#modal-root').innerHTML = '';
+  currentModal = null;
+}
+
+function showModalError(modal, err) {
+  const p = modal.querySelector('.form-err');
+  if (p) { p.hidden = false; p.textContent = (err && err.message) || String(err); }
+}
+
+let toastTimer = null;
+function toast(msg) {
+  const el = $('#toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
+}
+
+/* ---------- Bejelentkezés (éles mód) ---------- */
+function renderLogin(err) {
+  $('#bar').hidden = true;
+  const v = $('#view');
+  v.className = 'view view-login';
+  v.innerHTML = `<section class="login-box">
+    <span class="brand-mark big" aria-hidden="true"><i></i><i></i><i></i></span>
+    <h1>Munkakövetés</h1>
+    <p class="muted">Irodai bejelentkezés</p>
+    <label class="field"><span>E-mail cím</span><input id="l-email" type="email" autocomplete="username"></label>
+    <label class="field"><span>Jelszó</span><input id="l-pass" type="password" autocomplete="current-password"></label>
+    ${err ? `<p class="form-err">${esc(err)}</p>` : ''}
+    <button class="btn btn-primary wide" id="l-go">Bejelentkezés</button>
+  </section>`;
+  const submit = async () => {
+    $('#l-go').disabled = true;
+    try {
+      await S.api.signIn($('#l-email').value.trim(), $('#l-pass').value);
+      S.session = await S.api.getSession();
+      await afterLogin();
+    } catch (e) { renderLogin(e.message); }
+  };
+  $('#l-go').onclick = submit;
+  $('#l-pass').onkeydown = e => { if (e.key === 'Enter') submit(); };
+  $('#l-email').focus();
+}
+
+/* ---------- Kattintások, változások, billentyűzet ---------- */
+const ACTIONS = {
+  'retry': () => go(S.view),
+  'live-prev': () => { S.live.date = ymd(addDays(parseYmd(S.live.date), -1)); S.live.open.clear(); return reloadLive(); },
+  'live-next': () => {
+    const n = ymd(addDays(parseYmd(S.live.date), 1));
+    if (n > todayKey()) return;
+    S.live.date = n; S.live.open.clear(); return reloadLive();
+  },
+  'live-today': () => { S.live.date = todayKey(); S.live.open.clear(); return reloadLive(); },
+  'live-group': el => { S.live.group = el.dataset.v; renderLive(); },
+  'live-toggle': el => { const id = el.dataset.emp; if (S.live.open.has(id)) S.live.open.delete(id); else S.live.open.add(id); renderLive(); },
+  'live-close': el => closeShiftModal(el.dataset.emp),
+  'plan-prev': () => { S.plan.monday = ymd(addDays(parseYmd(S.plan.monday), -7)); return reloadPlan(); },
+  'plan-next': () => { S.plan.monday = ymd(addDays(parseYmd(S.plan.monday), 7)); return reloadPlan(); },
+  'plan-this': () => { S.plan.monday = ymd(mondayOf(new Date())); return reloadPlan(); },
+  'plan-copy': () => copyPrevWeek(),
+  'assign': el => assignModal(el.dataset.emp, el.dataset.date),
+  'unassign': async el => { el.disabled = true; await S.api.removeAssignment(el.dataset.id); await reloadPlan(); },
+  'admin-tab': el => { S.admin.tab = el.dataset.v; renderAdmin(); },
+  'emp-new': () => employeeModal(null),
+  'emp-edit': el => employeeModal(el.dataset.id),
+  'emp-pin': el => pinModal(el.dataset.id),
+  'emp-toggle': el => toggleActive('employees', el.dataset.id),
+  'task-new': () => taskModal(null),
+  'task-edit': el => taskModal(el.dataset.id),
+  'task-toggle': el => toggleActive('tasks', el.dataset.id),
+  'simple-new': el => simpleModal(el.dataset.table, null),
+  'simple-edit': el => simpleModal(el.dataset.table, el.dataset.id),
+  'simple-del': el => simpleDelete(el.dataset.table, el.dataset.id),
+  'term-new': () => terminalModal(null),
+  'term-edit': el => terminalModal(el.dataset.id),
+  'term-toggle': el => toggleActive('terminals', el.dataset.id),
+  'term-copy': el => copyText(el.dataset.url),
+};
+
+function onViewClick(ev) {
+  const el = ev.target.closest('[data-act]');
+  if (!el || el.disabled) return;
+  const handler = ACTIONS[el.dataset.act];
+  if (handler) Promise.resolve().then(() => handler(el, ev)).catch(e => toast('Hiba: ' + ((e && e.message) || e)));
+}
+
+function onViewChange(ev) {
+  const el = ev.target.closest('[data-change]');
+  if (!el) return;
+  if (el.dataset.change === 'live-date' && el.value) {
+    S.live.date = el.value > todayKey() ? todayKey() : el.value;
+    S.live.open.clear();
+    reloadLive();
+  } else if (el.dataset.change === 'term-select') {
+    S.termPreviewId = el.value;
+    startTerminal(el.value, $('#term-root'));
+  }
+}
+
+function onKey(ev) {
+  if (currentModal) {
+    if (ev.key === 'Escape') closeModal(currentModal);
+    else if (ev.key === 'Enter' && ev.target.matches && ev.target.matches('input:not([type=checkbox])')) {
+      const p = currentModal.querySelector('.modal-foot .btn-primary');
+      if (p) { ev.preventDefault(); p.click(); }
+    }
+    return;
+  }
+  const t = S.term;
+  if (!t || !t.el || !t.el.isConnected || t.busy || !t.cat) return;
+  if (ev.target.matches && ev.target.matches('input, select, textarea')) return;
+  // Számbillentyűzet és később az USB-s NFC olvasó is "billentyűzetként" ír ide
+  if (t.screen === 'pin') {
+    if (/^[0-9]$/.test(ev.key)) { ev.preventDefault(); termDigit(ev.key); }
+    else if (ev.key === 'Backspace') { ev.preventDefault(); t.pin = t.pin.slice(0, -1); renderTerm(); }
+  } else if (t.screen === 'qty') {
+    if (/^[0-9]$/.test(ev.key)) { ev.preventDefault(); qtyDigit(ev.key); }
+    else if (ev.key === 'Backspace') { ev.preventDefault(); t.flow.qtyInput = (t.flow.qtyInput || '').slice(0, -1); renderTerm(); }
+    else if (ev.key === 'Enter' && t.flow.qtyInput) { t.flow.quantity = Number(t.flow.qtyInput); afterQty(); }
+  }
+}
+
+/* Távoli változás (Supabase Realtime vagy a demóban egy másik nézet) */
+let rcTimer = null;
+const rcPending = new Set();
+function onRemoteChange(what) {
+  rcPending.add(what);
+  clearTimeout(rcTimer);
+  rcTimer = setTimeout(async () => {
+    const w = new Set(rcPending);
+    rcPending.clear();
+    try {
+      if (w.has('master')) await reloadMaster();
+      if (w.has('events')) refreshAlerts();
+      if (currentModal) return;                       // nyitott ablak alatt nem rajzolunk újra
+      if (S.view === 'live') { await loadLive(); renderLive(); }
+      else if (S.view === 'plan' && (w.has('assignments') || w.has('master'))) { await loadPlan(); renderPlan(); }
+    } catch (e) { console.warn('Frissítési hiba', e); }
+  }, 300);
+}
+
+/* ---------- Indítás ---------- */
+async function afterLogin() {
+  await reloadMaster();
+  S.api.subscribe(onRemoteChange);
+  renderShell();
+  refreshAlerts();
+  window.addEventListener('hashchange', () => go(location.hash.slice(1)));
+  await go(location.hash.slice(1) || 'live');
+  setInterval(() => {
+    if (S.view === 'live' && S.live.date === todayKey() && !currentModal) renderLive();
+  }, 30000);
+}
+
+async function boot() {
+  const v = $('#view');
+  v.addEventListener('click', onViewClick);
+  v.addEventListener('change', onViewChange);
+  document.addEventListener('keydown', onKey);
+  const terminalId = new URLSearchParams(location.search).get('terminal');
+  const live = Boolean(CONFIG.SUPABASE_URL && CONFIG.SUPABASE_ANON_KEY);
+  try {
+    S.api = live ? await createSupabaseAdapter() : createDemoAdapter();
+  } catch (e) {
+    v.innerHTML = errorBox(new Error('Nem sikerült betölteni az adatkapcsolatot. ' + e.message));
+    return;
+  }
+  if (terminalId) {                                   // kioszk mód: csak a tablet képernyő
+    S.kiosk = true;
+    document.body.classList.add('kiosk');
+    v.className = 'view view-kiosk term-host';
+    await startTerminal(terminalId, v);
+    return;
+  }
+  S.session = await S.api.getSession();
+  if (!S.session) return renderLogin();
+  await afterLogin();
+}
+
+boot();
+})();
+</script>
+</body>
+</html>
