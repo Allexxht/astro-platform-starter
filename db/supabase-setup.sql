@@ -41,6 +41,7 @@ create table if not exists public.mk_employees (
   team_id     uuid references public.mk_teams(id) on delete set null,
   has_pin     boolean not null default false,
   active      boolean not null default true,
+  archived_at timestamptz,                 -- kitöltve = archivált: eltűnik a listákból, de a napló megőrzi a nevét
   created_at  timestamptz not null default now()
 );
 
@@ -59,6 +60,7 @@ create table if not exists public.mk_tasks (
   description   text,                       -- a tableten a feladat alatt jelenik meg
   ask_quantity  boolean not null default false,  -- váltáskor / műszak végén kérdezzen darabszámot
   active        boolean not null default true,
+  archived_at   timestamptz,                 -- kitöltve = archivált: eltűnik a listákból, de a napló megőrzi a nevét
   sort          int not null default 0,
   created_at    timestamptz not null default now()
 );
@@ -70,6 +72,11 @@ create table if not exists public.mk_terminals (
   location_id  uuid references public.mk_locations(id) on delete set null,
   active       boolean not null default true
 );
+
+-- Utólagos oszlopok meglévő adatbázishoz (idempotens – a fenti create table csak új projektben fut le).
+-- Lásd: db/migrations/001_archive_columns.sql
+alter table public.mk_employees add column if not exists archived_at timestamptz;
+alter table public.mk_tasks     add column if not exists archived_at timestamptz;
 
 
 -- ---------------------------------------------------------------------
@@ -246,6 +253,60 @@ revoke all on function public.mk_set_pin(uuid, text) from public, anon;
 grant execute on function public.mk_set_pin(uuid, text) to authenticated;
 
 
+-- Dolgozó archiválása (csak iroda). Akkor hívjuk, ha a dolgozóhoz már tartozik esemény,
+-- ezért véglegesen nem törölhető. Kikapcsolja, PIN-jét törli, a jövőbeli beosztásait eltávolítja.
+-- A neve az mk_events soraiban megmarad, így a múltbeli napok naplója olvasható marad.
+create or replace function public.mk_archive_employee(p_employee uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'Archiválni csak bejelentkezett irodai felhasználó tud.';
+  end if;
+  if not exists (select 1 from public.mk_employees where id = p_employee) then
+    raise exception 'Nincs ilyen dolgozó.';
+  end if;
+
+  update public.mk_employees
+     set active = false, archived_at = coalesce(archived_at, now()), has_pin = false
+   where id = p_employee;
+  delete from public.mk_pins        where employee_id = p_employee;
+  delete from public.mk_assignments where employee_id = p_employee;
+end $$;
+
+revoke all on function public.mk_archive_employee(uuid) from public, anon;
+grant execute on function public.mk_archive_employee(uuid) to authenticated;
+
+
+-- Feladat archiválása (csak iroda). Ugyanaz az elv, mint a dolgozónál: kikapcsol, a beosztásokat törli,
+-- a név az mk_events soraiban megmarad a riportokhoz.
+create or replace function public.mk_archive_task(p_task uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'Archiválni csak bejelentkezett irodai felhasználó tud.';
+  end if;
+  if not exists (select 1 from public.mk_tasks where id = p_task) then
+    raise exception 'Nincs ilyen feladat.';
+  end if;
+
+  update public.mk_tasks
+     set active = false, archived_at = coalesce(archived_at, now())
+   where id = p_task;
+  delete from public.mk_assignments where task_id = p_task;
+end $$;
+
+revoke all on function public.mk_archive_task(uuid) from public, anon;
+grant execute on function public.mk_archive_task(uuid) to authenticated;
+
+
 -- Tablet indulásakor: a tablet adatai, helyszínek és feladatok listája.
 create or replace function public.mk_terminal_catalog(p_terminal uuid)
 returns jsonb
@@ -271,7 +332,8 @@ begin
                  'id', t.id, 'name', t.name, 'location_id', t.location_id, 'color', t.color,
                  'description', t.description, 'ask_quantity', t.ask_quantity,
                  'active', t.active, 'sort', t.sort) order by t.sort, t.name)
-          from public.mk_tasks t), '[]'::jsonb)
+          from public.mk_tasks t
+         where t.archived_at is null), '[]'::jsonb)
   );
 end $$;
 

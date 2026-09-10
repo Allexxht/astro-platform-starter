@@ -8,8 +8,9 @@ Munkakövető rendszer (MES-lite) a hegesztőüzemnek. Két felülete van:
 A bevezetés ütemekben halad. Most az MVP kész, és az ötletek menet közben alakulnak át: ami nem válik be, azt kivesszük.
 
 ## Fájlok
-- `munkakovetes/index.html` – egyfájlos app (vanilla JS, nincs build lépés, CSS és JS inline, kommentfejlécekkel tagolva). A script elején van a `CONFIG`. Üres Supabase kulcsokkal DEMÓ módban fut, memóriában tárolt mintaadatokkal.
-- `supabase-setup.sql` – séma, RLS, függvények, kezdő adatok. Többször is futtatható (idempotens). A Supabase Dashboard SQL Editorában kell futtatni.
+- `public/munkakovetes/index.html` – egyfájlos app (vanilla JS, nincs build lépés, CSS és JS inline, kommentfejlécekkel tagolva). A script elején van a `CONFIG`. Üres Supabase kulcsokkal DEMÓ módban fut, memóriában tárolt mintaadatokkal. Az Astro starter a `public/` mappát változtatás nélkül átmásolja, így az app a `/munkakovetes/` útvonalon szolgálódik ki.
+- `db/supabase-setup.sql` – teljes séma, RLS, függvények, kezdő adatok. Többször is futtatható (idempotens). A Supabase Dashboard SQL Editorában kell futtatni.
+- `db/migrations/NNN_*.sql` – növekményes DB-változások meglévő projekthez, sorszámozva. Mindegyik idempotens. Tartalmuk a `supabase-setup.sql` friss verziójában is benne van.
 
 ## Architektúra
 - Stack: Netlify (GitHub CI/CD), Supabase (Postgres, Auth, Realtime). A supabase-js ESM-ként töltődik a jsdelivr CDN-ről, dinamikus importtal.
@@ -20,12 +21,15 @@ A bevezetés ütemekben halad. Most az MVP kész, és az ötletek menet közben 
 ## Adatmodell
 - `mk_teams` (csapat/szakma) és `mk_locations` (helyszín/csarnok): szándékosan két külön dimenzió.
 - `mk_employees`, `mk_tasks` (helyszín, szín, leírás, `ask_quantity`), `mk_terminals` (az id a tablet titkos kulcsa).
+- `mk_employees.archived_at` és `mk_tasks.archived_at`: kitöltve = archivált. Az archivált elem eltűnik a törzsadatokból, a heti tervből és a tabletről (a listák `archived_at is null` / kliensoldali szűréssel), de a neve az `mk_events` soraiban megmarad, így a múltbeli napok élő nézete olvasható.
 - `mk_assignments`: `work_date` + dolgozó + feladat egyedi. A `note` mezőbe kerül most a rendelésszám.
 - `mk_events`: csak bővülő eseménynapló. Típusai: `start`, `pause`, `resume`, `block`, `end`, `qty`.
 - Az állapotot és a munkaidőt mindig az eseménynaplóból számoljuk (`summarize()` a kliensben), külön állapotmezőt nem tárolunk.
 
 ## Biztonság
 - Iroda = bármely `authenticated` felhasználó (MVP). A nyilvános regisztráció legyen kikapcsolva.
+- Irodai belépés felhasználónévvel: a kliens a `CONFIG.LOGIN_DOMAIN` (`bremat.local`) alapján e-maillé alakítja (kisbetű, ékezet le, szóköz→pont, pl. „Alex" → `alex@bremat.local`), és így hívja a Supabase `signInWithPassword`-öt. A Supabase Auth-ban a felhasználók `<valami>@bremat.local` e-maillel vannak. Aki `@`-ot ír be, azt változatlanul e-mailként használjuk (a régi valódi e-mailes fiók is működik).
+- `mk_archive_employee` / `mk_archive_task`: security definer, csak `authenticated`. Akkor hívja a kliens, ha az elemhez már tartozik `mk_events` sor, ezért véglegesen nem törölhető. Kikapcsol, `archived_at`-et állít, a beosztásokat törli, dolgozónál a PIN-t is (`mk_pins`).
 - Tablet = `anon`, csak RPC-t hívhat: `mk_terminal_catalog`, `mk_terminal_identify`, `mk_terminal_event`. A PIN minden hívással megy.
 - Hibás PIN esetén tabletenként legfeljebb 10 próbálkozás engedett percenként.
 - `mk_pins`: sha256 hash, RLS policy nélkül, csak security definer függvények érik el. `mk_set_pin` csak `authenticated` jogosultsággal hívható, `mk__pin_employee` belső függvény.
@@ -39,8 +43,12 @@ A bevezetés ütemekben halad. Most az MVP kész, és az ötletek menet közben 
 - Tablet: kesztyűs kézre méretezett gombok, egy művelet legfeljebb 2–3 érintés. 45 mp tétlenség után visszaáll a PIN képernyőre.
 
 ## Állapot (2026. szeptember 10.)
-- Az MVP kész. A demó mód összes folyamatát automatikus teszt játszotta végig. Az SQL-t PostgreSQL 16-on, Supabase-szerű szerepkörökkel teszteltük.
-- Még nincs kipróbálva: az élő Supabase-kapcsolat és a Realtime frissítés.
+- Az MVP élesben fut: Netlify (`bremat.netlify.app`) + saját Supabase projekt (`nuufcwpbjfimykumufgi`). A `CONFIG`-ban be van írva a Supabase URL és a publishable key.
+- Deploy: az `Allexxht/astro-platform-starter` repo, az app a `public/munkakovetes/` alatt.
+- Azóta bekerült két változás:
+  - **Irodai belépés felhasználónévvel** e-mail helyett (`CONFIG.LOGIN_DOMAIN`, lásd Biztonság). A fejlécben a név a `@bremat.local` rész nélkül jelenik meg.
+  - **Törlés a törzsadatoknál** minden fülön, megerősítéssel. A Kikapcsolás megmarad átmeneti állapotnak. Tablet: mindig végleges törlés (a link megszűnik). Dolgozó/feladat: esemény nélkül végleges törlés (beosztásokkal együtt), egyébként archiválás (`archived_at`). Helyszín/csapat: törlés, a megerősítő ablak kiírja, hány elemet érint.
+- Még nincs kipróbálva éles Supabase ellen: a Realtime frissítés, és a törlés/archiválás végigkattintása.
 - Nyitott kérdések: mely ötletek nem tetszettek; a valódi törzsadatok (dolgozók, csapatok, csarnokok, feladatok); a tabletek száma.
 
 ## Ütemterv
@@ -58,3 +66,5 @@ A bevezetés ütemekben halad. Most az MVP kész, és az ötletek menet közben 
 ## Munkamódszer
 - A magyarázatok magyarul szóljanak, de a menü- és beállításneveket angolul írd, mert az eszközök angol nyelvű felületet használnak.
 - Módosítás után DEMÓ módban ellenőrizd a fő folyamatot: PIN → kezdés → váltás darabszámmal → elakadás → lezárás. Emellett az élő nézet és a heti terv működjön.
+- Törzsadat-módosításnál ellenőrizd a törlést mindkét ágon: új (esemény nélküli) dolgozó/feladat → végleges törlés; meglévő (eseményes, pl. Kovács Gábor) → archiválás, és utána a korábbi nap élő nézetében a neve még látszik, de a mai listákból/heti tervből eltűnt.
+- DEMÓ mód teszteléséhez a `CONFIG` két Supabase mezőjét ideiglenesen ürítsd ki (élesben ne maradjon úgy).

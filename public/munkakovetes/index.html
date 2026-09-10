@@ -360,6 +360,10 @@ const CONFIG = {
   SUPABASE_URL: 'https://nuufcwpbjfimykumufgi.supabase.co',
   SUPABASE_ANON_KEY: 'sb_publishable_PkHro-X1yYxPxCO_FzDo-g__OIojxJ8',
 
+  // Irodai belépés: a felhasználónévből a háttérben e-mail lesz (a Supabase Auth e-mailt kér).
+  // Pl. "Alex" -> alex@bremat.local. Aki @ jelet ír be, azt változatlanul e-mailként használjuk.
+  LOGIN_DOMAIN: 'bremat.local',
+
   PIN_LENGTH: 4,
   SHOW_SATURDAY: true,            // heti tervben hétfő–szombat
   TERMINAL_IDLE_SECONDS: 45,      // ennyi tétlenség után a tablet visszaáll a PIN képernyőre
@@ -388,6 +392,20 @@ const fmtDateShort = d => d.toLocaleDateString('hu-HU', { month: 'short', day: '
 const fmtDateLong = d => d.toLocaleDateString('hu-HU', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
 const fmtDur = min => { min = Math.max(0, Math.round(min || 0)); const h = Math.floor(min / 60), m = min % 60; return h ? `${h} ó ${m} p` : `${m} p`; };
 const firstName = name => (name || '').trim().split(/\s+/).slice(-1)[0] || name;
+// Irodai belépés: felhasználónév -> e-mail. "@" jelet tartalmazó bevitelt változatlanul hagyunk.
+const loginEmail = raw => {
+  const s = String(raw == null ? '' : raw).trim();
+  if (s.includes('@')) return s;
+  const local = s.toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '')
+    .replace(/\s+/g, '.').replace(/[^a-z0-9._-]/g, '');
+  return local ? `${local}@${CONFIG.LOGIN_DOMAIN}` : s;
+};
+// Fejléc: a bejelentkezett felhasználó neve a @<LOGIN_DOMAIN> rész nélkül.
+const loginDisplayName = email => {
+  const e = String(email == null ? '' : email);
+  const suffix = '@' + CONFIG.LOGIN_DOMAIN;
+  return e.toLowerCase().endsWith(suffix.toLowerCase()) ? e.slice(0, -suffix.length) : e;
+};
 const byId = list => Object.fromEntries((list || []).map(x => [x.id, x]));
 const groupBy = (list, key) => list.reduce((acc, x) => { (acc[x[key]] = acc[x[key]] || []).push(x); return acc; }, {});
 const clone = o => JSON.parse(JSON.stringify(o));
@@ -475,8 +493,8 @@ function createDemoAdapter() {
   const notify = what => setTimeout(() => listeners.forEach(fn => fn(what)), 0);
   const DEFAULTS = {
     teams: { sort: 0 }, locations: { sort: 0 },
-    employees: { active: true, team_id: null },
-    tasks: { active: true, sort: 0, color: '#9aa7b0', ask_quantity: false, description: '', location_id: null },
+    employees: { active: true, team_id: null, archived_at: null },
+    tasks: { active: true, sort: 0, color: '#9aa7b0', ask_quantity: false, description: '', location_id: null, archived_at: null },
     terminals: { active: true, location_id: null },
   };
   seedDemo(db);
@@ -511,6 +529,19 @@ function createDemoAdapter() {
       db[table] = db[table].filter(x => x.id !== id);
       if (table === 'locations') [...db.tasks, ...db.terminals].forEach(x => { if (x.location_id === id) x.location_id = null; });
       if (table === 'teams') db.employees.forEach(e => { if (e.team_id === id) e.team_id = null; });
+      if (table === 'employees') { delete db.pins[id]; db.assignments = db.assignments.filter(a => a.employee_id !== id); }
+      if (table === 'tasks') db.assignments = db.assignments.filter(a => a.task_id !== id);
+      if (table === 'terminals') db.events.forEach(e => { if (e.terminal_id === id) e.terminal_id = null; });
+      notify('master');
+    },
+    async eventCount(field, id) {
+      return db.events.filter(e => e[field] === id).length;
+    },
+    async archive(table, id) {
+      const row = db[table].find(x => x.id === id);
+      if (row) { row.active = false; row.archived_at = new Date().toISOString(); }
+      if (table === 'employees') { delete db.pins[id]; db.assignments = db.assignments.filter(a => a.employee_id !== id); }
+      else if (table === 'tasks') { db.assignments = db.assignments.filter(a => a.task_id !== id); }
       notify('master');
     },
     async setPin(employeeId, manual) {
@@ -584,7 +615,7 @@ function seedDemo(db) {
   db.locations = [row('1-es csarnok', 1), row('2-es csarnok', 2), row('3-as csarnok', 3), row('Raktár', 4), row('Iroda', 5)];
   const L = n => (db.locations.find(l => l.name === n) || {}).id || null;
   const TM = n => (db.teams.find(t => t.name === n) || {}).id || null;
-  const task = (name, loc, color, ask, sort, description = '') => ({ id: uid(), name, location_id: L(loc), color, ask_quantity: ask, active: true, sort, description });
+  const task = (name, loc, color, ask, sort, description = '') => ({ id: uid(), name, location_id: L(loc), color, ask_quantity: ask, active: true, archived_at: null, sort, description });
   db.tasks = [
     task('Konténerhegesztés', '2-es csarnok', '#ff8f3d', false, 1, 'Varratok a rajz szerint. Hegesztés előtt ellenőrizd a fűzést és a méreteket.'),
     task('Összeállítás, fűzés', '1-es csarnok', '#5aa9ff', true, 2, 'Összeállítás rajz szerint, a méreteket fűzés előtt ellenőrizd.'),
@@ -607,7 +638,7 @@ function seedDemo(db) {
     ['Tóth István', 'Raktár', '4444', 'Raktári pakolás', null],
     ['Molnár Attila', 'Raktár', '8888', 'Raktári pakolás', null],
   ];
-  db.employees = people.map(([name, team, pin]) => { const e = { id: uid(), name, team_id: TM(team), active: true }; db.pins[e.id] = pin; return e; });
+  db.employees = people.map(([name, team, pin]) => { const e = { id: uid(), name, team_id: TM(team), active: true, archived_at: null }; db.pins[e.id] = pin; return e; });
   const E = n => db.employees.find(e => e.name === n).id;
   db.terminals = [
     { id: 'demo-tablet-1', name: '1-es csarnok tablet', location_id: L('1-es csarnok'), active: true },
@@ -679,7 +710,7 @@ async function createSupabaseAdapter() {
     async getSession() { const { data } = await sb.auth.getSession(); return data.session; },
     async signIn(email, password) {
       const { error } = await sb.auth.signInWithPassword({ email, password });
-      if (error) throw new Error('Hibás e-mail cím vagy jelszó.');
+      if (error) throw new Error('Hibás felhasználónév vagy jelszó.');
     },
     async signOut() { await sb.auth.signOut(); },
     async loadMaster() {
@@ -698,6 +729,16 @@ async function createSupabaseAdapter() {
       return q(sb.from(T(table)).insert(data).select().single());
     },
     async remove(table, id) { await q(sb.from(T(table)).delete().eq('id', id)); },
+    async eventCount(field, id) {
+      const { count, error } = await sb.from(T('events')).select('*', { count: 'exact', head: true }).eq(field, id);
+      if (error) throw new Error(error.message);
+      return count || 0;
+    },
+    async archive(table, id) {
+      if (table === 'employees') { await q(sb.rpc('mk_archive_employee', { p_employee: id })); return; }
+      if (table === 'tasks') { await q(sb.rpc('mk_archive_task', { p_task: id })); return; }
+      throw new Error('Ez a típus nem archiválható: ' + table);
+    },
     async setPin(employeeId, manual) { return q(sb.rpc('mk_set_pin', { p_employee: employeeId, p_pin: manual || null })); },
     async getAssignments(from, to) {
       return q(sb.from(T('assignments')).select('*').gte('work_date', from).lte('work_date', to).order('sort').order('created_at'));
@@ -767,7 +808,7 @@ function renderShell() {
     </nav>
     <div class="bar-end">${S.api.mode === 'demo'
       ? '<span class="mode" title="Az adatok csak ebben a böngészőben élnek, újratöltéskor visszaállnak.">Demó adatok</span>'
-      : `<span class="muted small">${esc(S.session && S.session.user && S.session.user.email || '')}</span><button class="btn small ghost" data-bar="logout">Kilépés</button>`}</div>`;
+      : `<span class="muted small">${esc(loginDisplayName(S.session && S.session.user && S.session.user.email || ''))}</span><button class="btn small ghost" data-bar="logout">Kilépés</button>`}</div>`;
   bar.onclick = async ev => {
     if (ev.target.closest('[data-bar="logout"]')) { await S.api.signOut(); location.reload(); }
   };
@@ -1105,29 +1146,29 @@ const offTag = x => x.active ? '' : ' <span class="tag">kikapcsolva</span>';
 const ADMIN_RENDER = {
   employees() {
     const m = M();
-    const list = [...S.master.employees].sort((a, b) => (Number(b.active) - Number(a.active)) || byName(a, b));
-    return `<div class="admin-head"><p class="muted">A dolgozók a tableten a PIN kódjukkal jelentkeznek be. A kikapcsolt dolgozó nem tud bejelentkezni, de a naplója megmarad.</p>
+    const list = S.master.employees.filter(e => !e.archived_at).sort((a, b) => (Number(b.active) - Number(a.active)) || byName(a, b));
+    return `<div class="admin-head"><p class="muted">A dolgozók a tableten a PIN kódjukkal jelentkeznek be. A kikapcsolt dolgozó nem tud bejelentkezni, de a naplója megmarad – ez átmeneti állapot. A Törlés véglegesen eltávolítja, vagy archiválja, ha már van rögzített eseménye.</p>
       <button class="btn btn-primary" data-act="emp-new">Új dolgozó</button></div>
       <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Név</th><th>Csapat</th><th>PIN</th><th></th></tr></thead><tbody>
       ${list.map(e => `<tr class="${e.active ? '' : 'is-off'}">
         <td>${esc(e.name)}${offTag(e)}</td>
         <td>${esc((m.team[e.team_id] || { name: '–' }).name)}</td>
         <td>${e.has_pin ? 'Van' : '<span class="tag tag-warn">Nincs</span>'}</td>
-        <td class="actions"><button class="btn small" data-act="emp-edit" data-id="${e.id}">Szerkesztés</button><button class="btn small" data-act="emp-pin" data-id="${e.id}">Új PIN</button>${toggleBtn('emp-toggle', e)}</td>
+        <td class="actions"><button class="btn small" data-act="emp-edit" data-id="${e.id}">Szerkesztés</button><button class="btn small" data-act="emp-pin" data-id="${e.id}">Új PIN</button>${toggleBtn('emp-toggle', e)}<button class="btn small ghost" data-act="emp-del" data-id="${e.id}">Törlés</button></td>
       </tr>`).join('')}
       </tbody></table></div>`;
   },
   tasks() {
     const m = M();
-    const list = [...S.master.tasks].sort((a, b) => (Number(b.active) - Number(a.active)) || bySortName(a, b));
-    return `<div class="admin-head"><p class="muted">Ezeket osztod be a heti tervben, és ezek közül választ a dolgozó a tableten. A leírás a tableten a feladat alatt jelenik meg.</p>
+    const list = S.master.tasks.filter(t => !t.archived_at).sort((a, b) => (Number(b.active) - Number(a.active)) || bySortName(a, b));
+    return `<div class="admin-head"><p class="muted">Ezeket osztod be a heti tervben, és ezek közül választ a dolgozó a tableten. A leírás a tableten a feladat alatt jelenik meg. A Kikapcsolás átmeneti; a Törlés véglegesen eltávolítja, vagy archiválja, ha már van rögzített eseménye.</p>
       <button class="btn btn-primary" data-act="task-new">Új feladat</button></div>
       <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Feladat</th><th>Helyszín</th><th>Darabszám</th><th></th></tr></thead><tbody>
       ${list.map(t => `<tr class="${t.active ? '' : 'is-off'}">
         <td><span class="swatch" style="--c:${esc(t.color)}"></span>${esc(t.name)}${offTag(t)}${t.description ? `<div class="muted small clamp">${esc(t.description)}</div>` : ''}</td>
         <td>${esc((m.loc[t.location_id] || { name: '–' }).name)}</td>
         <td>${t.ask_quantity ? 'Kéri' : '–'}</td>
-        <td class="actions"><button class="btn small" data-act="task-edit" data-id="${t.id}">Szerkesztés</button>${toggleBtn('task-toggle', t)}</td>
+        <td class="actions"><button class="btn small" data-act="task-edit" data-id="${t.id}">Szerkesztés</button>${toggleBtn('task-toggle', t)}<button class="btn small ghost" data-act="task-del" data-id="${t.id}">Törlés</button></td>
       </tr>`).join('')}
       </tbody></table></div>`;
   },
@@ -1142,7 +1183,7 @@ const ADMIN_RENDER = {
         <td>${esc(t.name)}${offTag(t)}</td>
         <td>${esc((m.loc[t.location_id] || { name: '–' }).name)}</td>
         <td><input class="link-input" readonly value="${esc(url)}" aria-label="${esc(t.name)} linkje"></td>
-        <td class="actions"><button class="btn small" data-act="term-copy" data-url="${esc(url)}">Link másolása</button><button class="btn small" data-act="term-edit" data-id="${t.id}">Szerkesztés</button>${toggleBtn('term-toggle', t)}</td>
+        <td class="actions"><button class="btn small" data-act="term-copy" data-url="${esc(url)}">Link másolása</button><button class="btn small" data-act="term-edit" data-id="${t.id}">Szerkesztés</button>${toggleBtn('term-toggle', t)}<button class="btn small ghost" data-act="term-del" data-id="${t.id}">Törlés</button></td>
       </tr>`; }).join('')}
       </tbody></table></div>`;
   },
@@ -1271,13 +1312,71 @@ function simpleModal(table, id) {
 function simpleDelete(table, id) {
   const row = S.master[table].find(x => x.id === id);
   if (!row) return;
+  let impact;
+  if (table === 'locations') {
+    const nTask = S.master.tasks.filter(t => t.location_id === id && !t.archived_at).length;
+    const nTerm = S.master.terminals.filter(t => t.location_id === id).length;
+    const parts = [];
+    if (nTask) parts.push(`${nTask} feladat`);
+    if (nTerm) parts.push(`${nTerm} tablet`);
+    impact = parts.length
+      ? `Érintett: ${parts.join(' és ')}. Ezeknél a helyszín „nincs megadva” lesz.`
+      : 'Nincs hozzá rendelt feladat vagy tablet.';
+  } else {
+    const nEmp = S.master.employees.filter(e => e.team_id === id && !e.archived_at).length;
+    impact = nEmp ? `Érintett: ${nEmp} dolgozó. Ők csapat nélkül maradnak.` : 'Nincs ebben a csapatban dolgozó.';
+  }
   openModal({
     title: `${row.name} törlése`,
-    body: `<p>${table === 'locations' ? 'A hozzá tartozó feladatoknál és tableteknél a helyszín üres lesz.' : 'A csapat dolgozói csapat nélkül maradnak.'} A naplóból nem vész el semmi.</p>`,
+    body: `<p>${impact}</p><p class="muted small">A naplóból nem vész el semmi.</p>`,
     actions: [{ label: 'Mégse' }, {
-      label: 'Törlés', danger: true, onClick: async () => { await S.api.remove(table, id); await reloadMaster(); renderAdmin(); },
+      label: 'Törlés', danger: true, onClick: async () => { await S.api.remove(table, id); await reloadMaster(); renderAdmin(); toast('Törölve'); },
     }],
   });
+}
+
+// Dolgozó / feladat / tablet törlése. Tablet: mindig végleges. Dolgozó és feladat:
+// esemény nélkül végleges törlés, egyébként archiválás. A megerősítő ablak előre megmondja, melyik lesz.
+async function removeRowModal(table, id) {
+  const row = S.master[table].find(x => x.id === id);
+  if (!row) return;
+
+  if (table === 'terminals') {
+    openModal({
+      title: `${row.name} törlése`,
+      body: `<p>A tablet véglegesen törlődik, és <b>a linkje azonnal megszűnik</b>. Amelyik eszközön meg van nyitva, ott a következő művelettől „Ismeretlen vagy kikapcsolt tablet” hibát ad. Új linket csak új tablet felvételével kapsz.</p>
+        <p class="muted small">A korábbi események megmaradnak, csak a tablet neve nem lesz többé kiolvasható a naplóból.</p>`,
+      actions: [{ label: 'Mégse' }, {
+        label: 'Végleges törlés', danger: true, onClick: async () => { await S.api.remove('terminals', id); await reloadMaster(); renderAdmin(); toast('Tablet törölve'); },
+      }],
+    });
+    return;
+  }
+
+  const field = table === 'employees' ? 'employee_id' : 'task_id';
+  const word = table === 'employees' ? 'dolgozó' : 'feladat';
+  let count;
+  try { count = await S.api.eventCount(field, id); }
+  catch (e) { toast('Nem sikerült ellenőrizni: ' + ((e && e.message) || e)); return; }
+
+  if (count === 0) {
+    openModal({
+      title: `${row.name} törlése`,
+      body: `<p>Nincs hozzá tartozó rögzített esemény a naplóban, ezért <b>véglegesen törölhető</b>. A hozzá tartozó beosztások is törlődnek.</p>`,
+      actions: [{ label: 'Mégse' }, {
+        label: 'Végleges törlés', danger: true, onClick: async () => { await S.api.remove(table, id); await reloadMaster(); renderAdmin(); toast(capFirst(word) + ' törölve'); },
+      }],
+    });
+  } else {
+    openModal({
+      title: `${row.name} archiválása`,
+      body: `<p>Már ${count} rögzített esemény tartozik hozzá a naplóban, ezért véglegesen nem törölhető – <b>archiválás</b> lesz.</p>
+        <p>Az archivált ${word} eltűnik a törzsadatokból, a heti tervből és a tabletről${table === 'employees' ? ', és a PIN kódja megszűnik' : ''}. A beosztásai törlődnek. A múltbeli napok élő nézetének naplójában a neve továbbra is látszik.</p>`,
+      actions: [{ label: 'Mégse' }, {
+        label: 'Archiválás', danger: true, onClick: async () => { await S.api.archive(table, id); await reloadMaster(); renderAdmin(); toast(capFirst(word) + ' archiválva'); },
+      }],
+    });
+  }
 }
 
 function terminalModal(id) {
@@ -1694,7 +1793,7 @@ function renderLogin(err) {
     <span class="brand-mark big" aria-hidden="true"><i></i><i></i><i></i></span>
     <h1>Munkakövetés</h1>
     <p class="muted">Irodai bejelentkezés</p>
-    <label class="field"><span>E-mail cím</span><input id="l-email" type="email" autocomplete="username"></label>
+    <label class="field"><span>Felhasználónév</span><input id="l-user" type="text" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false"></label>
     <label class="field"><span>Jelszó</span><input id="l-pass" type="password" autocomplete="current-password"></label>
     ${err ? `<p class="form-err">${esc(err)}</p>` : ''}
     <button class="btn btn-primary wide" id="l-go">Bejelentkezés</button>
@@ -1702,14 +1801,14 @@ function renderLogin(err) {
   const submit = async () => {
     $('#l-go').disabled = true;
     try {
-      await S.api.signIn($('#l-email').value.trim(), $('#l-pass').value);
+      await S.api.signIn(loginEmail($('#l-user').value), $('#l-pass').value);
       S.session = await S.api.getSession();
       await afterLogin();
     } catch (e) { renderLogin(e.message); }
   };
   $('#l-go').onclick = submit;
   $('#l-pass').onkeydown = e => { if (e.key === 'Enter') submit(); };
-  $('#l-email').focus();
+  $('#l-user').focus();
 }
 
 /* ---------- Kattintások, változások, billentyűzet ---------- */
@@ -1736,15 +1835,18 @@ const ACTIONS = {
   'emp-edit': el => employeeModal(el.dataset.id),
   'emp-pin': el => pinModal(el.dataset.id),
   'emp-toggle': el => toggleActive('employees', el.dataset.id),
+  'emp-del': el => removeRowModal('employees', el.dataset.id),
   'task-new': () => taskModal(null),
   'task-edit': el => taskModal(el.dataset.id),
   'task-toggle': el => toggleActive('tasks', el.dataset.id),
+  'task-del': el => removeRowModal('tasks', el.dataset.id),
   'simple-new': el => simpleModal(el.dataset.table, null),
   'simple-edit': el => simpleModal(el.dataset.table, el.dataset.id),
   'simple-del': el => simpleDelete(el.dataset.table, el.dataset.id),
   'term-new': () => terminalModal(null),
   'term-edit': el => terminalModal(el.dataset.id),
   'term-toggle': el => toggleActive('terminals', el.dataset.id),
+  'term-del': el => removeRowModal('terminals', el.dataset.id),
   'term-copy': el => copyText(el.dataset.url),
 };
 
