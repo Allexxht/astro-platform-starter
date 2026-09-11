@@ -175,6 +175,18 @@ button{cursor:pointer}
 .clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:60ch}
 .link-input{width:100%;min-width:240px;padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--muted);font-size:13px}
 
+/* ===== Riportok ===== */
+.reports-toolbar{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 16px;margin-bottom:12px}
+.reports-toolbar .view-title{flex:1 1 auto}
+.field.inline{flex-direction:row;align-items:center;gap:6px}
+.field.inline>span{white-space:nowrap;font-size:13px}
+.field.inline select,.field.inline input{min-height:34px;padding:4px 8px;font-size:14px}
+.rep-range{padding-bottom:8px}
+.rep-actions{display:flex;gap:8px;margin-left:auto}
+.rep-tbl tr.rep-open td{color:var(--stop)}
+.rep-tbl tr.rep-total td{font-weight:700;background:var(--raised)}
+.rep-tbl tr.rep-noshow td:first-child,.rep-tbl tr.rep-offplan td:first-child{box-shadow:inset 3px 0 0 var(--hot)}
+
 /* ===== Modal, űrlap, toast ===== */
 .backdrop{position:fixed;inset:0;z-index:50;display:flex;align-items:flex-start;justify-content:center;padding:6vh 16px;overflow:auto;background:rgba(12,15,17,.64)}
 .modal{width:min(580px,100%);background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,.45)}
@@ -361,6 +373,23 @@ body.kiosk .view{display:flex;flex-direction:column;max-width:none;height:100vh;
   *,*::before,*::after{animation:none !important;transition:none !important}
   .done-check path{stroke-dashoffset:0}
 }
+
+/* ===== Nyomtatás: riportok, fekvő A4 ===== */
+@media print{
+  @page{size:A4 landscape;margin:12mm}
+  body{background:#fff;color:#111}
+  .bar{display:none !important}
+  .view{padding:0;max-width:none}
+  .reports .rep-actions,.reports .subtabs{display:none !important}
+  .reports .reports-toolbar{margin-bottom:10px}
+  .reports .view-title,.reports .rep-range,.reports .field.inline>span{color:#111}
+  .reports .field.inline select,.reports .field.inline input{background:#fff;color:#111;border:1px solid #999}
+  .rep-tbl{background:#fff;border-color:#999}
+  .rep-tbl th{background:#eee;color:#111;border-color:#999}
+  .rep-tbl td{color:#111;border-color:#ccc}
+  .rep-tbl tr.rep-total td{background:#f2f2f2}
+  .rep-tbl tr.rep-open td{color:#b3261e}
+}
 </style>
 </head>
 <body>
@@ -449,6 +478,45 @@ const byName = (a, b) => a.name.localeCompare(b.name, 'hu');
 const bySortName = (a, b) => ((a.sort || 0) - (b.sort || 0)) || byName(a, b);
 const byTime = (a, b) => Date.parse(a.event_time) - Date.parse(b.event_time);
 const todayKey = () => ymd(new Date());
+const round2 = n => Math.round((n || 0) * 100) / 100;
+
+/* ---------- Riportok: dátum/időzóna segédfüggvények (mindig Europe/Budapest szerint) ---------- */
+const REPORT_TZ = 'Europe/Budapest';
+const bpDayFmt = new Intl.DateTimeFormat('sv-SE', { timeZone: REPORT_TZ, year: 'numeric', month: '2-digit', day: '2-digit' });
+const budapestDay = t => bpDayFmt.format(new Date(t));            // esemény időpontjából "YYYY-MM-DD" Budapest szerinti nap
+const budapestToday = () => budapestDay(Date.now());
+const ymdToUTC = s => { const [y, m, d] = s.split('-').map(Number); return Date.UTC(y, m - 1, d); };
+const utcToYmd = ms => { const d = new Date(ms); return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`; };
+const addDaysYmd = (s, n) => utcToYmd(ymdToUTC(s) + n * 86400000);
+const weekdayOfYmd = s => (new Date(ymdToUTC(s)).getUTCDay() + 6) % 7;      // hétfő = 0
+const mondayOfYmd = s => addDaysYmd(s, -weekdayOfYmd(s));
+const fmtDateHu = s => s ? s.replace(/-/g, '.') + '.' : '';
+function monthBoundsYmd(ymdInMonth, offsetMonths) {
+  const [y, m] = ymdInMonth.split('-').map(Number);
+  const idx = (m - 1) + offsetMonths;
+  const targetY = y + Math.floor(idx / 12);
+  const targetM = ((idx % 12) + 12) % 12;                          // 0-alapú hónap
+  const start = `${targetY}-${pad(targetM + 1)}-01`;
+  const last = new Date(Date.UTC(targetY, targetM + 1, 0));         // a hónap utolsó napja
+  const end = `${last.getUTCFullYear()}-${pad(last.getUTCMonth() + 1)}-${pad(last.getUTCDate())}`;
+  return [start, end];
+}
+const REPORT_PERIODS = [
+  ['thisWeek', 'Ez a hét'], ['prevWeek', 'Előző hét'], ['today', 'Ma'], ['yesterday', 'Tegnap'],
+  ['thisMonth', 'Ez a hónap'], ['prevMonth', 'Előző hónap'], ['custom', 'Egyedi'],
+];
+function periodRangeYmd(period, customFrom, customTo) {
+  const today = budapestToday();
+  switch (period) {
+    case 'today': return [today, today];
+    case 'yesterday': { const y = addDaysYmd(today, -1); return [y, y]; }
+    case 'thisWeek': { const mon = mondayOfYmd(today); return [mon, addDaysYmd(mon, 6)]; }
+    case 'prevWeek': { const mon = addDaysYmd(mondayOfYmd(today), -7); return [mon, addDaysYmd(mon, 6)]; }
+    case 'thisMonth': return monthBoundsYmd(today, 0);
+    case 'prevMonth': return monthBoundsYmd(today, -1);
+    default: return [customFrom || today, customTo || today];
+  }
+}
 
 function groupTasksByLocation(tasks, locations) {
   const locs = [...locations].sort(bySortName);
@@ -799,6 +867,57 @@ function seedDemo(db) {
     if (n === 'Nagy Péter') yev(n, 'qty', 14, 29, { task_id: tid, quantity: 36 });
     yev(n, 'end', 14, 30 + k, { task_id: tid });
   });
+
+  // A folyó hét korábbi (már elmúlt), de ma/tegnapnál régebbi napjaira is legyen
+  // esemény a meglévő beosztás szerint – különben a Terv és tény riport hamis
+  // "nem jelent meg" sorokat mutatna pusztán amiatt, hogy a demóban csak a mára
+  // és a tegnapra van részletesen felvéve esemény.
+  const yKey = ymd(y);
+  days.forEach((dKey, di) => {
+    if (dKey === today || dKey === yKey || parseYmd(dKey) >= parseYmd(today)) return;
+    people.forEach(([n], pi) => {
+      const asn = db.assignments.find(a => a.work_date === dKey && a.employee_id === E(n));
+      if (!asn) return;
+      const idx = 1000 + di * people.length + pi;
+      const base = parseYmd(dKey); base.setHours(6 + (idx % 2), (idx * 7) % 60, 0, 0);
+      const push = (type, addMin, extra) => db.events.push({ id: uid(), employee_id: E(n), ...blank, ...extra, type, event_time: new Date(base.getTime() + addMin * 60000).toISOString() });
+      push('start', 0, { task_id: asn.task_id, terminal_id: T1 });
+      push('pause', 180, { task_id: asn.task_id, terminal_id: T1 });
+      push('resume', 200, { task_id: asn.task_id, terminal_id: T1 });
+      push('end', 480 + (idx % 3) * 15, { task_id: asn.task_id, terminal_id: T1 });
+    });
+  });
+
+  // Több hetes múlt a Riportokhoz: az előző öt hét minden munkanapjára teljes napi
+  // esemény és a hozzá tartozó beosztás, hogy a Terv és tény / Rendelésszám riportoknak
+  // is legyen miből dolgozniuk. Néhány nap szándékosan eltér: hiányzás, terven kívüli
+  // munka, lezáratlan műszak – ugyanazok az esetek, mint a mai mintában.
+  const WEEKS_BACK = 5;
+  const histDays = [];
+  for (let c = addDays(mon, -7 * WEEKS_BACK); c < mon; c = addDays(c, 1)) {
+    if (c.getDay() !== 0) histDays.push(new Date(c));                 // vasárnap kimarad
+  }
+  histDays.forEach((d, di) => {
+    const isSat = d.getDay() === 6;
+    const dKey = ymd(d);
+    people.forEach(([n, , , t, note], pi) => {
+      if (isSat && !['Kovács Gábor', 'Nagy Péter', 'Tóth István'].includes(n)) return;
+      const idx = di * people.length + pi;
+      db.assignments.push({ id: uid(), work_date: dKey, employee_id: E(n), task_id: K(t), sort: 0, note, details: null });
+      const absent = idx % 17 === 5;                                  // ritkán beosztva, de nem jött
+      if (absent) return;
+      const offPlan = idx % 11 === 3;                                 // ritkán más feladatot csinál
+      const tid = K(offPlan ? db.tasks[(pi + di) % db.tasks.length].name : t);
+      const base = new Date(d); base.setHours(6 + (idx % 2), (idx * 7) % 60, 0, 0);
+      const push = (type, addMin, extra) => db.events.push({ id: uid(), employee_id: E(n), ...blank, ...extra, type, event_time: new Date(base.getTime() + addMin * 60000).toISOString() });
+      push('start', 0, { task_id: tid, terminal_id: T1, off_plan: offPlan, reason: offPlan ? 'Sürgős munka jött' : null });
+      push('pause', 180, { task_id: tid, terminal_id: T1 });
+      push('resume', 200, { task_id: tid, terminal_id: T1 });
+      if (idx % 4 === 0) push('qty', 470, { task_id: tid, terminal_id: T1, quantity: 8 + (idx % 6) });
+      const unclosed = idx % 23 === 9;                                // ritkán elfelejt kilépni
+      if (!unclosed) push('end', 480 + (idx % 3) * 15, { task_id: tid, terminal_id: T1 });
+    });
+  });
 }
 
 /* ---------- ÉLES adatréteg: Supabase ---------- */
@@ -942,6 +1061,10 @@ const S = {
   live: { date: todayKey(), group: 'location', events: [], assignments: [], open: new Set() },
   plan: { monday: ymd(mondayOf(new Date())), assignments: [] },
   admin: { tab: 'employees' },
+  reports: (() => {
+    const [from, to] = periodRangeYmd('thisWeek');
+    return { period: 'thisWeek', from, to, team: '', loc: '', emp: '', tab: 'attendance', data: null, loading: false, error: null };
+  })(),
   termPreviewId: null,
   term: null,
 };
@@ -953,7 +1076,7 @@ const reloadMaster = async () => { S.master = await S.api.loadMaster(); };
 const errorBox = e => `<div class="empty"><p>Hiba történt: ${esc(e && e.message || e)}</p><button class="btn" data-act="retry">Újrapróbálás</button></div>`;
 
 /* ---------- Keret és navigáció ---------- */
-const VIEWS = ['live', 'plan', 'admin', 'terminal'];
+const VIEWS = ['live', 'plan', 'admin', 'reports', 'terminal'];
 
 function renderShell() {
   const bar = $('#bar');
@@ -964,6 +1087,7 @@ function renderShell() {
       <a href="#live" data-nav="live">Élő nézet <span class="badge" id="alert-badge" hidden></span></a>
       <a href="#plan" data-nav="plan">Heti terv</a>
       <a href="#admin" data-nav="admin">Törzsadatok</a>
+      <a href="#reports" data-nav="reports">Riportok</a>
       <a href="#terminal" data-nav="terminal">Tablet</a>
     </nav>
     <div class="bar-end">${S.api.mode === 'demo'
@@ -986,6 +1110,7 @@ async function go(view) {
     if (view === 'live') { await loadLive(); renderLive(); }
     else if (view === 'plan') { await loadPlan(); renderPlan(); }
     else if (view === 'admin') renderAdmin();
+    else if (view === 'reports') { await loadReports(); renderReports(); }
     else await renderTerminalTab();
   } catch (e) { v.innerHTML = errorBox(e); }
 }
@@ -1013,14 +1138,17 @@ function liveRows(isToday) {
     .filter(r => r.ev.length || (r.e.active && r.assignments.length));
 }
 
-function rowLocation(r, m) {
-  const task = m.task[r.st.taskId];
+// Egy nap helyszíne: elsősorban a (jelenlegi/utolsó) feladat helyszíne, másodsorban a tablet helyszíne.
+// Az élő nézet és a riportok is ugyanezt a logikát használják a csoportosításhoz/szűréshez.
+function locationOfDay(taskId, ev, m) {
+  const task = m.task[taskId];
   if (task && task.location_id && m.loc[task.location_id]) return task.location_id;
-  const last = r.ev[r.ev.length - 1];
+  const last = ev && ev[ev.length - 1];
   const term = last && m.term[last.terminal_id];
   if (term && term.location_id && m.loc[term.location_id]) return term.location_id;
-  return '_none';
+  return null;
 }
+function rowLocation(r, m) { return locationOfDay(r.st.taskId, r.ev, m) || '_none'; }
 
 const STATE_ORDER = { block: 0, work: 1, pause: 2, done: 3, off: 4 };
 
@@ -1688,6 +1816,366 @@ async function copyText(text) {
   catch (e) { toast('Nem sikerült másolni. Jelöld ki a linket, és másold ki kézzel.'); }
 }
 
+/* ---------- RIPORTOK ----------
+   Nincs külön DB-lekérdezés/nézet: minden a mk_events eseménynaplóból és az
+   mk_assignments beosztásból számolódik, ugyanazzal a summarize()-zal, mint
+   az élő nézet. Az időszak (from–to) alapján egyszer töltjük be az adatokat
+   (S.reports.data), a négy alfül és a szűrők (csapat/helyszín/dolgozó) ebből
+   számolnak újra, DB-hívás nélkül. */
+
+const REPORT_TABS = [['attendance', 'Jelenlét'], ['byTask', 'Feladatonként'], ['planActual', 'Terv és tény'], ['byOrder', 'Rendelésszám szerint']];
+
+async function loadReports() {
+  const R = S.reports;
+  R.loading = true; R.error = null;
+  try {
+    const { from, to } = R;
+    // Az esemény-lekérdezéshez egynapos ráhagyással kérünk (a pontos Budapest-napot
+    // utólag, kliensoldalon számoljuk), hogy bármilyen UTC-eltolás mellett biztosan
+    // meglegyen minden esemény. A beosztás work_date oszlopa nem UTC-függő.
+    const padFrom = new Date(ymdToUTC(from) - 86400000).toISOString();
+    const padTo = new Date(ymdToUTC(to) + 2 * 86400000).toISOString();
+    const [events, assignments] = await Promise.all([
+      S.api.getEvents(padFrom, padTo),
+      S.api.getAssignments(from, to),
+    ]);
+    R.data = buildReportData(events, assignments, from, to);
+  } catch (e) {
+    R.error = e;
+  } finally {
+    R.loading = false;
+  }
+}
+async function reloadReports() { renderReports(); await loadReports(); renderReports(); }
+
+function buildReportData(events, assignments, from, to) {
+  const byEmpDay = {};
+  for (const e of events) {
+    const day = budapestDay(e.event_time);
+    if (day < from || day > to) continue;
+    (byEmpDay[e.employee_id] = byEmpDay[e.employee_id] || {});
+    (byEmpDay[e.employee_id][day] = byEmpDay[e.employee_id][day] || []).push(e);
+  }
+  Object.values(byEmpDay).forEach(days => Object.values(days).forEach(list => list.sort(byTime)));
+
+  const asnByEmpDay = {};
+  for (const a of assignments) {
+    (asnByEmpDay[a.employee_id] = asnByEmpDay[a.employee_id] || {});
+    (asnByEmpDay[a.employee_id][a.work_date] = asnByEmpDay[a.employee_id][a.work_date] || []).push(a);
+  }
+
+  const today = budapestToday();
+  const summaries = [];
+  for (const empId in byEmpDay) {
+    for (const day in byEmpDay[empId]) {
+      summaries.push({ empId, day, st: summarize(byEmpDay[empId][day], day === today) });
+    }
+  }
+  return { from, to, byEmpDay, asnByEmpDay, summaries };
+}
+
+function reportEmployees(filters) {
+  return byId(S.master.employees.filter(e => {
+    if (filters.team && e.team_id !== filters.team) return false;
+    if (filters.emp && e.id !== filters.emp) return false;
+    return true;
+  }));
+}
+
+/* ---- a) Jelenlét: dolgozónként, naponként; lezáratlan műszak pirossal, kihagyva az összesítőből ---- */
+function computeAttendanceReport(data, filters, m) {
+  const emps = reportEmployees(filters);
+  const rows = [];
+  const totals = {};
+  data.summaries
+    .filter(s => emps[s.empId])
+    .filter(s => !filters.loc || locationOfDay(s.st.taskId, data.byEmpDay[s.empId][s.day], m) === filters.loc)
+    .forEach(s => {
+      const { empId, day, st } = s;
+      const breakMin = Math.max(0, st.presentMin - st.workMin);
+      rows.push({ empId, name: emps[empId].name, day, st, breakMin });
+      const t = totals[empId] = totals[empId] || { empId, name: emps[empId].name, presentMin: 0, workMin: 0, breakMin: 0, days: 0, openDays: 0 };
+      if (st.open) t.openDays++;
+      else { t.presentMin += st.presentMin; t.workMin += st.workMin; t.breakMin += breakMin; t.days++; }
+    });
+  rows.sort((a, b) => byName({ name: a.name }, { name: b.name }) || (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
+  return { rows, totals: Object.values(totals).sort(byName) };
+}
+
+/* ---- b) Feladatonként: összóra, dolgozói létszám, darabszám, óra/darab ---- */
+function computeByTaskReport(data, filters, m) {
+  const emps = reportEmployees(filters);
+  const agg = {};
+  data.summaries.filter(s => emps[s.empId] && !s.st.open).forEach(s => {
+    Object.entries(s.st.perTask).forEach(([taskId, min]) => {
+      const task = m.task[taskId];
+      if (filters.loc && (!task || task.location_id !== filters.loc)) return;
+      const a = agg[taskId] = agg[taskId] || { taskId, minutes: 0, qty: 0, emps: new Set() };
+      a.minutes += min; a.emps.add(s.empId);
+    });
+    Object.entries(s.st.qty).forEach(([taskId, q]) => {
+      const task = m.task[taskId];
+      if (filters.loc && (!task || task.location_id !== filters.loc)) return;
+      (agg[taskId] = agg[taskId] || { taskId, minutes: 0, qty: 0, emps: new Set() }).qty += q;
+    });
+  });
+  const rows = Object.values(agg).map(a => ({
+    taskId: a.taskId, name: (m.task[a.taskId] || { name: 'Törölt feladat' }).name,
+    hours: a.minutes / 60, empCount: a.emps.size, qty: a.qty,
+    perPiece: a.qty > 0 ? (a.minutes / 60) / a.qty : null,
+  })).sort((a, b) => b.hours - a.hours);
+  return { rows };
+}
+
+/* ---- c) Terv és tény: naponként ki mire volt beosztva, mit csinált ténylegesen ---- */
+function computePlanActualReport(data, filters, m) {
+  const emps = reportEmployees(filters);
+  const today = budapestToday();
+  const rows = [];
+  for (const empId in emps) {
+    const asnDays = data.asnByEmpDay[empId] || {};
+    const evDays = data.byEmpDay[empId] || {};
+    const days = new Set([...Object.keys(asnDays), ...Object.keys(evDays)]);
+    days.forEach(day => {
+      if (day < data.from || day > data.to || day > today) return;    // jövőbeli napra még nincs mit jelenteni
+      const asn = asnDays[day] || [];
+      const ev = evDays[day] || [];
+      const st = ev.length ? summarize(ev, day === today) : null;
+      if (filters.loc) {
+        const loc = st ? locationOfDay(st.taskId, ev, m) : (asn[0] && m.task[asn[0].task_id] && m.task[asn[0].task_id].location_id);
+        if (loc !== filters.loc) return;
+      }
+      const plannedIds = asn.map(a => a.task_id);
+      const actualIds = st ? Object.keys(st.perTask) : [];
+      rows.push({
+        empId, name: emps[empId].name, day,
+        planned: asn.map(a => ({ name: (m.task[a.task_id] || { name: 'Törölt feladat' }).name, note: a.note })),
+        actual: actualIds.map(id => ({ name: (m.task[id] || { name: 'Törölt feladat' }).name, hours: st.perTask[id] / 60 })),
+        noShow: asn.length > 0 && actualIds.length === 0 && day !== today,
+        offPlanWork: actualIds.some(id => !plannedIds.includes(id)),
+        open: st ? st.open : false,
+      });
+    });
+  }
+  rows.sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0) || byName({ name: a.name }, { name: b.name }));
+  return { rows };
+}
+
+/* ---- d) Rendelésszám szerint: a beosztás "note" mezője alapján, feladatonként és dolgozónként ---- */
+function computeByOrderReport(data, filters, m) {
+  const emps = reportEmployees(filters);
+  const buckets = {};
+  data.summaries.filter(s => emps[s.empId] && !s.st.open).forEach(s => {
+    const asnForDay = (data.asnByEmpDay[s.empId] && data.asnByEmpDay[s.empId][s.day]) || [];
+    Object.entries(s.st.perTask).forEach(([taskId, min]) => {
+      const task = m.task[taskId];
+      if (filters.loc && (!task || task.location_id !== filters.loc)) return;
+      const asn = asnForDay.find(a => a.task_id === taskId);
+      const note = (asn && asn.note) || null;
+      const noteKey = note || '__none__';
+      const b = buckets[noteKey] = buckets[noteKey] || { note, rows: {}, total: 0 };
+      const key = taskId + '|' + s.empId;
+      const r = b.rows[key] = b.rows[key] || { taskId, taskName: (task || { name: 'Törölt feladat' }).name, empId: s.empId, empName: emps[s.empId].name, minutes: 0 };
+      r.minutes += min; b.total += min;
+    });
+  });
+  const groups = Object.values(buckets).map(b => ({
+    note: b.note, total: b.total / 60,
+    rows: Object.values(b.rows).map(r => ({ ...r, hours: r.minutes / 60 }))
+      .sort((a, b2) => byName({ name: a.empName }, { name: b2.empName }) || a.taskName.localeCompare(b2.taskName, 'hu')),
+  })).sort((a, b) => (!a.note - !b.note) || (a.note || '').localeCompare(b.note || '', 'hu'));
+  return { groups };
+}
+
+/* ---- Megjelenítés ---- */
+function employeeOptions(selected) {
+  const list = [...S.master.employees].sort(byName);
+  return `<option value="">Minden dolgozó</option>` + list.map(e => `<option value="${e.id}" ${e.id === selected ? 'selected' : ''}>${esc(e.name)}${e.archived_at ? ' (archivált)' : ''}</option>`).join('');
+}
+
+function renderReports() {
+  const R = S.reports;
+  $('#view').innerHTML = `<section class="reports">
+    <div class="toolbar reports-toolbar">
+      <h1 class="view-title">Riportok</h1>
+      <label class="field inline"><span>Időszak</span>
+        <select data-change="rep-period">${REPORT_PERIODS.map(([k, l]) => `<option value="${k}" ${k === R.period ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      </label>
+      ${R.period === 'custom'
+        ? `<label class="field inline"><span>Ettől</span><input type="date" data-change="rep-from" value="${R.from}" max="${R.to}"></label>
+           <label class="field inline"><span>Eddig</span><input type="date" data-change="rep-to" value="${R.to}" min="${R.from}"></label>`
+        : `<span class="muted small rep-range">${esc(fmtDateHu(R.from))} – ${esc(fmtDateHu(R.to))}</span>`}
+      <label class="field inline"><span>Csapat</span><select data-change="rep-team">${options(S.master.teams, R.team, 'Minden csapat')}</select></label>
+      <label class="field inline"><span>Helyszín</span><select data-change="rep-loc">${options(S.master.locations, R.loc, 'Minden helyszín')}</select></label>
+      <label class="field inline"><span>Dolgozó</span><select data-change="rep-emp">${employeeOptions(R.emp)}</select></label>
+      <div class="rep-actions">
+        <button class="btn" data-act="rep-print">Nyomtatás</button>
+        <button class="btn btn-primary" data-act="rep-excel">Excel letöltés</button>
+      </div>
+    </div>
+    <div class="subtabs" role="tablist">${REPORT_TABS.map(([k, l]) => `<button role="tab" aria-selected="${k === R.tab}" data-act="rep-tab" data-v="${k}">${l}</button>`).join('')}</div>
+    <div class="rep-body" id="rep-body">${renderReportBody()}</div>
+  </section>`;
+}
+
+function renderReportBody() {
+  const R = S.reports;
+  if (R.loading) return '<div class="loading">Betöltés…</div>';
+  if (R.error) return errorBox(R.error);
+  if (!R.data) return '<div class="loading">Betöltés…</div>';
+  const m = M();
+  const filters = { team: R.team, loc: R.loc, emp: R.emp };
+  if (R.tab === 'attendance') return renderAttendanceTable(computeAttendanceReport(R.data, filters, m));
+  if (R.tab === 'byTask') return renderByTaskTable(computeByTaskReport(R.data, filters, m));
+  if (R.tab === 'planActual') return renderPlanActualTable(computePlanActualReport(R.data, filters, m));
+  return renderByOrderTable(computeByOrderReport(R.data, filters, m));
+}
+const NO_DATA_HTML = '<div class="empty"><p>Nincs adat ebben az időszakban a megadott szűrőkkel.</p></div>';
+const byEmpId = list => Object.fromEntries(list.map(x => [x.empId, x]));
+
+function renderAttendanceTable({ rows, totals }) {
+  if (!rows.length) return NO_DATA_HTML;
+  const totalsByEmp = byEmpId(totals);
+  const groups = [];
+  let cur = null;
+  rows.forEach(r => { if (!cur || cur.empId !== r.empId) { cur = { empId: r.empId, name: r.name, rows: [] }; groups.push(cur); } cur.rows.push(r); });
+  return `<div class="tbl-wrap"><table class="tbl rep-tbl">
+    <thead><tr><th>Dolgozó</th><th>Nap</th><th>Érkezés</th><th>Távozás</th><th>Jelenlét</th><th>Munkaidő</th><th>Szünet</th><th></th></tr></thead>
+    <tbody>${groups.map(g => {
+      const t = totalsByEmp[g.empId];
+      return g.rows.map(r => `<tr class="${r.st.open ? 'rep-open' : ''}">
+        <td>${esc(r.name)}</td><td>${esc(fmtDateHu(r.day))}</td>
+        <td>${r.st.firstIn != null ? fmtTime(r.st.firstIn) : '–'}</td>
+        <td>${!r.st.open && r.st.state === 'done' ? fmtTime(r.st.lastOut) : '–'}</td>
+        <td>${fmtDur(r.st.presentMin)}</td><td>${fmtDur(r.st.workMin)}</td><td>${fmtDur(r.breakMin)}</td>
+        <td>${r.st.open ? '<span class="tag tag-warn">Nem zárta le</span>' : ''}</td>
+      </tr>`).join('')
+      + `<tr class="rep-total"><td colspan="2">${esc(g.name)} – időszak összesen (${t.days} nap${t.openDays ? `, ${t.openDays} lezáratlan kihagyva` : ''})</td><td></td><td></td><td>${fmtDur(t.presentMin)}</td><td>${fmtDur(t.workMin)}</td><td>${fmtDur(t.breakMin)}</td><td></td></tr>`;
+    }).join('')}</tbody>
+  </table></div>`;
+}
+
+function renderByTaskTable({ rows }) {
+  if (!rows.length) return NO_DATA_HTML;
+  const totalHours = rows.reduce((s, r) => s + r.hours, 0);
+  return `<div class="tbl-wrap"><table class="tbl rep-tbl">
+    <thead><tr><th>Feladat</th><th>Összes óra</th><th>Dolgozók száma</th><th>Darabszám</th><th>Óra / darab</th></tr></thead>
+    <tbody>${rows.map(r => `<tr><td>${esc(r.name)}</td><td>${r.hours.toFixed(2)} óra</td><td>${r.empCount}</td><td>${r.qty || '–'}</td><td>${r.perPiece != null ? r.perPiece.toFixed(2) : '–'}</td></tr>`).join('')}</tbody>
+    <tfoot><tr class="rep-total"><td>Összesen</td><td>${totalHours.toFixed(2)} óra</td><td></td><td></td><td></td></tr></tfoot>
+  </table></div>`;
+}
+
+function renderPlanActualTable({ rows }) {
+  if (!rows.length) return NO_DATA_HTML;
+  return `<div class="tbl-wrap"><table class="tbl rep-tbl">
+    <thead><tr><th>Dolgozó</th><th>Nap</th><th>Beosztva</th><th>Ténylegesen</th><th></th></tr></thead>
+    <tbody>${rows.map(r => `<tr class="${r.noShow ? 'rep-noshow' : ''}${r.offPlanWork ? ' rep-offplan' : ''}">
+      <td>${esc(r.name)}</td><td>${esc(fmtDateHu(r.day))}</td>
+      <td>${r.planned.length ? r.planned.map(p => esc(p.name) + (p.note ? ` (${esc(p.note)})` : '')).join(', ') : '<span class="muted">nincs beosztás</span>'}</td>
+      <td>${r.actual.length ? r.actual.map(a => `${esc(a.name)}: ${a.hours.toFixed(2)} óra`).join(', ') : '<span class="muted">nem jelentkezett be</span>'}${r.open ? ' <span class="tag tag-warn">Nem zárta le</span>' : ''}</td>
+      <td>${r.noShow ? '<span class="tag tag-warn">Nem jelent meg</span>' : ''}${r.offPlanWork ? '<span class="tag tag-warn">Más feladaton</span>' : ''}</td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+function renderByOrderTable({ groups }) {
+  if (!groups.length) return NO_DATA_HTML;
+  return `<div class="tbl-wrap"><table class="tbl rep-tbl">
+    <thead><tr><th>Rendelésszám</th><th>Feladat</th><th>Dolgozó</th><th>Óra</th></tr></thead>
+    <tbody>${groups.map(g => g.rows.map(r => `<tr><td>${esc(g.note || '–')}</td><td>${esc(r.taskName)}</td><td>${esc(r.empName)}</td><td>${r.hours.toFixed(2)} óra</td></tr>`).join('')
+      + `<tr class="rep-total"><td colspan="3">${esc(g.note || 'Rendelésszám nélkül')} – összesen</td><td>${g.total.toFixed(2)} óra</td></tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+/* ---- Excel export: egy .xlsx, riportonként külön munkalap (SheetJS, lazy CDN import) ---- */
+function setColFormat(XLSX, ws, colIdx0, fmt, dataRowCount) {
+  for (let r = 1; r <= dataRowCount; r++) {
+    const addr = XLSX.utils.encode_cell({ r, c: colIdx0 });
+    if (ws[addr]) ws[addr].z = fmt;
+  }
+}
+function addAttendanceSheet(XLSX, wb, { rows, totals }) {
+  const totalsByEmp = byEmpId(totals);
+  const groups = {};
+  rows.forEach(r => { (groups[r.empId] = groups[r.empId] || []).push(r); });
+  const aoa = [['Dolgozó', 'Nap', 'Érkezés', 'Távozás', 'Jelenlét (óra)', 'Munkaidő (óra)', 'Szünet (óra)', 'Megjegyzés']];
+  Object.keys(groups).forEach(empId => {
+    groups[empId].forEach(r => aoa.push([
+      r.name, fmtDateHu(r.day),
+      r.st.firstIn != null ? fmtTime(r.st.firstIn) : '',
+      (!r.st.open && r.st.state === 'done') ? fmtTime(r.st.lastOut) : '',
+      round2(r.st.presentMin / 60), round2(r.st.workMin / 60), round2(r.breakMin / 60),
+      r.st.open ? 'Nem zárta le a műszakot – nincs beleszámítva' : '',
+    ]));
+    const t = totalsByEmp[empId];
+    aoa.push([`${t.name} – összesen`, '', '', '', round2(t.presentMin / 60), round2(t.workMin / 60), round2(t.breakMin / 60), t.openDays ? `${t.openDays} lezáratlan nap kihagyva` : '']);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  [4, 5, 6].forEach(c => setColFormat(XLSX, ws, c, '0.00', aoa.length - 1));
+  ws['!cols'] = [{ wch: 22 }, { wch: 12 }, { wch: 9 }, { wch: 9 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 34 }];
+  XLSX.utils.book_append_sheet(wb, ws, 'Jelenlét');
+}
+function addByTaskSheet(XLSX, wb, { rows }) {
+  const aoa = [['Feladat', 'Összes óra', 'Dolgozók száma', 'Darabszám', 'Óra / darab']];
+  rows.forEach(r => aoa.push([r.name, round2(r.hours), r.empCount, r.qty || 0, r.perPiece != null ? round2(r.perPiece) : '']));
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  [1, 4].forEach(c => setColFormat(XLSX, ws, c, '0.00', aoa.length - 1));
+  ws['!cols'] = [{ wch: 28 }, { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 12 }];
+  XLSX.utils.book_append_sheet(wb, ws, 'Feladatonként');
+}
+function addPlanActualSheet(XLSX, wb, { rows }) {
+  const aoa = [['Dolgozó', 'Nap', 'Beosztva', 'Ténylegesen', 'Nem jelent meg', 'Más feladaton dolgozott']];
+  rows.forEach(r => aoa.push([
+    r.name, fmtDateHu(r.day),
+    r.planned.map(p => p.name + (p.note ? ` (${p.note})` : '')).join('; '),
+    r.actual.map(a => `${a.name}: ${round2(a.hours)} óra`).join('; ') + (r.open ? ' (nem zárta le)' : ''),
+    r.noShow ? 'Igen' : '', r.offPlanWork ? 'Igen' : '',
+  ]));
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{ wch: 22 }, { wch: 12 }, { wch: 34 }, { wch: 34 }, { wch: 14 }, { wch: 20 }];
+  XLSX.utils.book_append_sheet(wb, ws, 'Terv és tény');
+}
+function addByOrderSheet(XLSX, wb, { groups }) {
+  const aoa = [['Rendelésszám', 'Feladat', 'Dolgozó', 'Óra']];
+  groups.forEach(g => {
+    g.rows.forEach(r => aoa.push([g.note || '', r.taskName, r.empName, round2(r.hours)]));
+    aoa.push([(g.note || 'Rendelésszám nélkül') + ' – összesen', '', '', round2(g.total)]);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  setColFormat(XLSX, ws, 3, '0.00', aoa.length - 1);
+  ws['!cols'] = [{ wch: 20 }, { wch: 26 }, { wch: 22 }, { wch: 10 }];
+  XLSX.utils.book_append_sheet(wb, ws, 'Rendelésszám szerint');
+}
+
+async function exportReportsExcel() {
+  const R = S.reports;
+  if (!R.data) { toast('Előbb töltsd be az adatokat.'); return; }
+  const btn = $('[data-act="rep-excel"]');
+  if (btn) { btn.disabled = true; btn.textContent = 'Készül…'; }
+  try {
+    const XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm');
+    const m = M();
+    const filters = { team: R.team, loc: R.loc, emp: R.emp };
+    const wb = XLSX.utils.book_new();
+    addAttendanceSheet(XLSX, wb, computeAttendanceReport(R.data, filters, m));
+    addByTaskSheet(XLSX, wb, computeByTaskReport(R.data, filters, m));
+    addPlanActualSheet(XLSX, wb, computePlanActualReport(R.data, filters, m));
+    addByOrderSheet(XLSX, wb, computeByOrderReport(R.data, filters, m));
+    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([wbout], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `Munkakovetes_riport_${R.from}_${R.to}.xlsx`;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+    toast('Excel letöltve');
+  } catch (e) {
+    toast('Nem sikerült az Excel exportot elkészíteni: ' + ((e && e.message) || e));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Excel letöltés'; }
+  }
+}
+
 /* ---------- TABLET (terminál) ----------
    Képernyők: pin → home → (pick / reason / qty / confirm) → done → pin
    A tablet állapotot nem tárol: minden gombnyomás után a szerver
@@ -2319,6 +2807,9 @@ const ACTIONS = {
   'term-toggle': el => toggleActive('terminals', el.dataset.id),
   'term-del': el => removeRowModal('terminals', el.dataset.id),
   'term-copy': el => copyText(el.dataset.url),
+  'rep-tab': el => { S.reports.tab = el.dataset.v; renderReports(); },
+  'rep-print': () => window.print(),
+  'rep-excel': () => exportReportsExcel(),
 };
 
 function onViewClick(ev) {
@@ -2338,6 +2829,30 @@ function onViewChange(ev) {
   } else if (el.dataset.change === 'term-select') {
     S.termPreviewId = el.value;
     startTerminal(el.value, $('#term-root'));
+  } else if (el.dataset.change === 'rep-period') {
+    const R = S.reports;
+    R.period = el.value;
+    if (el.value === 'custom') { renderReports(); }
+    else {
+      const [f, t] = periodRangeYmd(el.value);
+      const changed = f !== R.from || t !== R.to;
+      R.from = f; R.to = t;
+      if (changed) reloadReports(); else renderReports();
+    }
+  } else if (el.dataset.change === 'rep-from') {
+    S.reports.from = el.value;
+    if (S.reports.from > S.reports.to) S.reports.to = S.reports.from;
+    reloadReports();
+  } else if (el.dataset.change === 'rep-to') {
+    S.reports.to = el.value;
+    if (S.reports.to < S.reports.from) S.reports.from = S.reports.to;
+    reloadReports();
+  } else if (el.dataset.change === 'rep-team') {
+    S.reports.team = el.value; $('#rep-body').innerHTML = renderReportBody();
+  } else if (el.dataset.change === 'rep-loc') {
+    S.reports.loc = el.value; $('#rep-body').innerHTML = renderReportBody();
+  } else if (el.dataset.change === 'rep-emp') {
+    S.reports.emp = el.value; $('#rep-body').innerHTML = renderReportBody();
   }
 }
 

@@ -3,7 +3,7 @@
 ## Mi ez
 Munkakövető rendszer (MES-lite) a hegesztőüzemnek. Két felülete van:
 - **Tablet (csarnok):** falra szerelt Android tablet kioszk módban. A dolgozó PIN-nel azonosít, látja a mai beosztását, és gombokkal jelez: Kezdés, Feladatváltás, Szünet, Elakadtam (okkal), Műszak vége.
-- **Iroda:** heti beosztás (dolgozó × nap rács), élő nézet (ki mit csinál, hol, mióta), törzsadatok.
+- **Iroda:** heti beosztás (dolgozó × nap rács), élő nézet (ki mit csinál, hol, mióta), törzsadatok, riportok Excel exporttal.
 
 A bevezetés ütemekben halad. Most az MVP kész, és az ötletek menet közben alakulnak át: ami nem válik be, azt kivesszük.
 
@@ -18,6 +18,7 @@ A bevezetés ütemekben halad. Most az MVP kész, és az ötletek menet közben 
 - Adatréteg: `createDemoAdapter()` és `createSupabaseAdapter()` ugyanazzal az interfésszel. Új funkciót mindkettőbe be kell építeni.
 - Minden tábla `mk_` előtagot kap, mert ugyanabban a Supabase projektben él, mint a Valk logbook.
 - URL-ek: iroda `/munkakovetes/`, tablet `/munkakovetes/?terminal=<mk_terminals.id>`.
+- Az Excel export a SheetJS (`xlsx`) könyvtárat lazy módon, jsdelivr CDN-ről (`+esm`) tölti be, csak az „Excel letöltés” gomb megnyomásakor – ugyanaz a minta, mint a PDF.js betöltése a tabletes rajznézőnél.
 
 ## Adatmodell
 - `mk_teams` (csapat/szakma) és `mk_locations` (helyszín/csarnok): szándékosan két külön dimenzió.
@@ -27,6 +28,7 @@ A bevezetés ütemekben halad. Most az MVP kész, és az ötletek menet közben 
 - `mk_attachments`: feltöltött rajz (PDF/JPG/PNG) – `storage_path`, fájlnév, típus, méret. `mk_assignment_attachments`: beosztás ↔ csatolmány kapcsolótábla (több beosztás is hivatkozhat ugyanarra a fájlra). Csatolmány törlésekor (kliensoldali logika, `deleteAttachmentIfOrphan`) csak akkor törlődik a Storage-ból és az `mk_attachments`-ből, ha már semmilyen beosztás nem hivatkozik rá.
 - `mk_events`: csak bővülő eseménynapló. Típusai: `start`, `pause`, `resume`, `block`, `end`, `qty`.
 - Az állapotot és a munkaidőt mindig az eseménynaplóból számoljuk (`summarize()` a kliensben), külön állapotmezőt nem tárolunk.
+- **Riportok:** nincs hozzá külön tábla vagy nézet. A Riportok fül a kiválasztott időszakra egyszer lekéri az `mk_events` és `mk_assignments` sorokat (ugyanazokkal az adatréteg-függvényekkel, mint az élő nézet és a heti terv), és a négy alfül, illetve a csapat/helyszín/dolgozó szűrők ebből, kliensoldalon számolnak újra – nincs újabb DB-hívás szűrő- vagy fülváltáskor. A nap-határokat (melyik esemény melyik naphoz tartozik) mindig Europe/Budapest szerint, `Intl.DateTimeFormat`-tal számoljuk, függetlenül attól, milyen időzónában fut a böngésző.
 
 ## Biztonság
 - Iroda = bármely `authenticated` felhasználó (MVP). A nyilvános regisztráció legyen kikapcsolva.
@@ -55,17 +57,14 @@ A bevezetés ütemekben halad. Most az MVP kész, és az ötletek menet közben 
 - Azóta bekerült változások:
   - **Irodai belépés felhasználónévvel** e-mail helyett (`CONFIG.LOGIN_DOMAIN`, lásd Biztonság). A fejlécben a név a `@bremat.local` rész nélkül jelenik meg.
   - **Törlés a törzsadatoknál** minden fülön, megerősítéssel. A Kikapcsolás megmarad átmeneti állapotnak. Tablet: mindig végleges törlés (a link megszűnik). Dolgozó/feladat: esemény nélkül végleges törlés (beosztásokkal együtt), egyébként archiválás (`archived_at`). Helyszín/csapat: törlés, a megerősítő ablak kiírja, hány elemet érint.
-  - **Leírás és rajz csatolása a beosztáshoz.** Heti tervben a beosztás ablaka (+ gomb, vagy egy meglévő chipre kattintva) most többsoros leírást és rajz(ok) feltöltését is kéri (PDF/JPG/PNG, max. 20 MB/fájl, több is). „Egész hétre” és „Előző hét másolása” a leírást és a rajzokat is átviszi, fájlonként csak egyszer töltve fel (`mk_attachments` + `mk_assignment_attachments`, lásd Adatmodell). A tabletkártyán (beosztott munka, kezdés előtt és munka közben is) teljes hosszban látszik a beosztás leírása és a feladat általános leírása, és minden rajzhoz van egy „Rajz megnyitása” gomb, ami a fenti teljes képernyős nézőt nyitja meg. Biztonsági modell: lásd Biztonság → Rajzok.
-- Még nincs kipróbálva éles Supabase ellen: a Realtime frissítés, a törlés/archiválás végigkattintása, és ez az új rajz-funkció (a `002_attachments.sql` migráció futtatása + a `MK_SUPABASE_SERVICE_ROLE_KEY` Netlify env var beállítása szükséges hozzá).
-- Nyitott kérdések: mely ötletek nem tetszettek; a valódi törzsadatok (dolgozók, csapatok, csarnokok, feladatok); a tabletek száma.
+  - **Leírás és rajz csatolása a beosztáshoz.** Heti tervben a beosztás ablaka (+ gomb, vagy egy meglévő chipre kattintva) most többsoros leírást és rajz(ok) feltöltését is kéri (PDF/JPG/PNG, max. 20 MB/fájl, több is). „Egész hétre” és „Előző hét másolása” a leírást és a rajzokat is átviszi, fájlonként csak egyszer töltve fel (`mk_attachments` + `mk_assignment_attachments`, lásd Adatmodell). A tabletkártyán (beosztott munka, kezdés előtt és munka közben is) teljes hosszban látszik a beosztás leírása és a feladat általános leírása, és minden rajzhoz van egy „Rajz megnyitása” gomb, ami a fenti teljes képernyős nézőt nyitja meg. Biztonsági modell: lásd Biztonság → Rajzok. A rajzok a beosztáshoz csatolva maradnak úgy, ahogy most vannak – nem lesz belőle külön dokumentumtár verziókezeléssel.
+  - **Riportok fül, Excel exporttal.** Új „Riportok” fül az irodai fejlécben: időszakválasztó (Ma / Tegnap / Ez a hét / Előző hét / Ez a hónap / Előző hónap / Egyedi) és szűrők (csapat, helyszín, dolgozó), négy alfül – Jelenlét, Feladatonként, Terv és tény, Rendelésszám szerint. Nincs hozzá DB-változás: minden az `mk_events`/`mk_assignments` lekéréséből és a `summarize()`-ból számolódik, ugyanúgy, mint az élő nézetben. „Excel letöltés”: egy .xlsx, riportonként külön munkalappal (órák két tizedessel, magyar dátumformátum, a fájlnévben az időszak). Nyomtatáshoz fekvő A4-es print stílus. Demó módban több hetes mintaadat van hozzá.
+- Még nincs kipróbálva éles Supabase ellen: a Realtime frissítés, a törlés/archiválás végigkattintása, a rajz-funkció (a `002_attachments.sql` migráció futtatása + a `MK_SUPABASE_SERVICE_ROLE_KEY` Netlify env var beállítása szükséges hozzá), és a Riportok Excel exportja (a SheetJS CDN-betöltését ellenőrizni kell éles, korlátozás nélküli hálózaton).
+- Nyitott kérdések: mely ötletek nem tetszettek; a valódi törzsadatok (dolgozók, csapatok, csarnokok, feladatok); a tabletek száma; **az Elakadtam funkciót (a jelenlegi elakadás-jelzés workflow-ját) a próbahét után újragondoljuk** – egyelőre változatlan marad.
 
 ## Ütemterv
 - **2. kör:**
-  - ~~dokumentumtár rajzverzió-kezeléssel (Supabase Storage)~~ – az alap (leírás + rajz csatolása, biztonságos megnyitás a tableten) elkészült; a rajzverzió-kezelés (több verzió, előzmény) még nincs
-  - riportok Excel-exporttal
-  - értesítés elakadáskor
   - offline mód (a `p_event_time` paraméter már elő van készítve)
-  - hibabejelentés fotóval
 - **3. kör:**
   - megrendeléshez kötés és utókalkuláció
   - NFC kártya (a PIN képernyő már fogad billentyűzetes bevitelt, így az USB-s NFC olvasó is működni fog)
@@ -76,4 +75,5 @@ A bevezetés ütemekben halad. Most az MVP kész, és az ötletek menet közben 
 - Módosítás után DEMÓ módban ellenőrizd a fő folyamatot: PIN → kezdés → váltás darabszámmal → elakadás → lezárás. Emellett az élő nézet és a heti terv működjön.
 - Törzsadat-módosításnál ellenőrizd a törlést mindkét ágon: új (esemény nélküli) dolgozó/feladat → végleges törlés; meglévő (eseményes, pl. Kovács Gábor) → archiválás, és utána a korábbi nap élő nézetében a neve még látszik, de a mai listákból/heti tervből eltűnt.
 - Rajz/leírás módosításnál ellenőrizd: új beosztás létrehozása leírással + rajzzal, meglévő chip szerkesztése (leírás módosítás, rajz hozzáadás/törlés/megnyitás), „Egész hétre” és „Előző hét másolása” átviszi-e mindkettőt, és hogy egy beosztás törlése után a rajz csak akkor tűnik el a tárhelyről, ha más beosztás már nem hivatkozik rá. Tableten nézd meg a kártyát kezdés előtt és munka közben is, nyisd meg a rajzot (kép: pinch zoom; PDF: lapozás), és ellenőrizd, hogy nyitott rajznál nem 45 mp, hanem 10 perc után áll csak vissza a PIN képernyőre.
+- Riportoknál ellenőrizd: mind a négy alfül tölt adatot minden időszak-preset mellett (különösen „Ez a hónap”/„Előző hónap”, ahol a demó több hetes mintaadata van), a szűrők (csapat/helyszín/dolgozó) DB-hívás nélkül, azonnal szűrnek, egy lezáratlan műszak pirossal jelenik meg és nincs beleszámítva az időszaki összesítőbe, a jövőbeli napok nem jelennek meg hamis „nem jelent meg” sorként a Terv és tény fülön, és az Excel letöltés helyes .xlsx-et ad (riportonként külön munkalap, órák két tizedessel, magyar dátumformátum).
 - DEMÓ mód teszteléséhez a `CONFIG` két Supabase mezőjét ideiglenesen ürítsd ki (élesben ne maradjon úgy). DEMÓ módban a rajzok a böngésző memóriájában élnek, újratöltéskor elvesznek.
