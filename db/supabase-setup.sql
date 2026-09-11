@@ -89,10 +89,33 @@ create table if not exists public.mk_assignments (
   task_id      uuid not null references public.mk_tasks(id) on delete cascade,
   sort         int  not null default 0,
   note         text,                         -- pl. rendelésszám, konténer azonosító
+  details      text,                         -- többsoros leírás, tudnivaló a dolgozónak
   created_at   timestamptz not null default now(),
   unique (work_date, employee_id, task_id)
 );
 create index if not exists mk_assignments_date_idx on public.mk_assignments (work_date);
+alter table public.mk_assignments add column if not exists details text;
+
+-- Csatolt rajzok (PDF/JPG/PNG). Egy fájlt több beosztás is használhat, ezért
+-- külön táblában van a fájl (mk_attachments) és a beosztáshoz kötése
+-- (mk_assignment_attachments) – lásd db/migrations/002_attachments.sql.
+create table if not exists public.mk_attachments (
+  id            uuid primary key default gen_random_uuid(),
+  storage_path  text not null unique,
+  file_name     text not null,
+  mime_type     text,
+  size_bytes    bigint,
+  created_by    uuid references auth.users(id) on delete set null,
+  created_at    timestamptz not null default now()
+);
+
+create table if not exists public.mk_assignment_attachments (
+  assignment_id  uuid not null references public.mk_assignments(id) on delete cascade,
+  attachment_id  uuid not null references public.mk_attachments(id) on delete restrict,
+  created_at     timestamptz not null default now(),
+  primary key (assignment_id, attachment_id)
+);
+create index if not exists mk_assignment_attachments_att_idx on public.mk_assignment_attachments (attachment_id);
 
 
 -- ---------------------------------------------------------------------
@@ -129,25 +152,47 @@ create index if not exists mk_pin_failures_idx on public.mk_pin_failures (termin
 -- ---------------------------------------------------------------------
 -- 4) SOR SZINTŰ JOGOSULTSÁG (RLS)
 -- ---------------------------------------------------------------------
-alter table public.mk_teams        enable row level security;
-alter table public.mk_locations    enable row level security;
-alter table public.mk_employees    enable row level security;
-alter table public.mk_pins         enable row level security;
-alter table public.mk_tasks        enable row level security;
-alter table public.mk_terminals    enable row level security;
-alter table public.mk_assignments  enable row level security;
-alter table public.mk_events       enable row level security;
-alter table public.mk_pin_failures enable row level security;
+alter table public.mk_teams                  enable row level security;
+alter table public.mk_locations              enable row level security;
+alter table public.mk_employees              enable row level security;
+alter table public.mk_pins                   enable row level security;
+alter table public.mk_tasks                  enable row level security;
+alter table public.mk_terminals              enable row level security;
+alter table public.mk_assignments            enable row level security;
+alter table public.mk_attachments            enable row level security;
+alter table public.mk_assignment_attachments enable row level security;
+alter table public.mk_events                 enable row level security;
+alter table public.mk_pin_failures           enable row level security;
 
--- Iroda: teljes hozzáférés a törzsadatokhoz és a beosztáshoz
+-- Iroda: teljes hozzáférés a törzsadatokhoz, a beosztáshoz és a csatolmányokhoz
 do $$
 declare t text;
 begin
-  foreach t in array array['mk_teams','mk_locations','mk_employees','mk_tasks','mk_terminals','mk_assignments'] loop
+  foreach t in array array['mk_teams','mk_locations','mk_employees','mk_tasks','mk_terminals','mk_assignments','mk_attachments','mk_assignment_attachments'] loop
     execute format('drop policy if exists office_all on public.%I', t);
     execute format('create policy office_all on public.%I for all to authenticated using (true) with check (true)', t);
   end loop;
 end $$;
+
+-- Storage: privát "mk-rajzok" bucket a rajzoknak. Csak az iroda (authenticated)
+-- éri el közvetlenül. A tablet (anon) sosem kap Storage policyt – csak az
+-- mk_terminal_attachment_path függvényen és egy Netlify végponton keresztül,
+-- rövid lejáratú signed URL-lel nyithat meg egy rajzot (lásd lejjebb).
+insert into storage.buckets (id, name, public)
+values ('mk-rajzok', 'mk-rajzok', false)
+on conflict (id) do nothing;
+
+drop policy if exists mk_office_storage_select on storage.objects;
+create policy mk_office_storage_select on storage.objects for select to authenticated
+  using (bucket_id = 'mk-rajzok');
+
+drop policy if exists mk_office_storage_insert on storage.objects;
+create policy mk_office_storage_insert on storage.objects for insert to authenticated
+  with check (bucket_id = 'mk-rajzok');
+
+drop policy if exists mk_office_storage_delete on storage.objects;
+create policy mk_office_storage_delete on storage.objects for delete to authenticated
+  using (bucket_id = 'mk-rajzok');
 
 -- Eseménynapló: az iroda olvashat és rögzíthet (pl. elfelejtett kijelentkezés lezárása),
 -- de módosítani és törölni senki nem tud – a napló csak bővül.
@@ -361,7 +406,17 @@ begin
   return jsonb_build_object(
     'employee', jsonb_build_object('id', v_emp_id, 'name', v_name),
     'assignments', coalesce((
-        select jsonb_agg(jsonb_build_object('task_id', a.task_id, 'note', a.note) order by a.sort, a.created_at)
+        select jsonb_agg(jsonb_build_object(
+                 'task_id', a.task_id, 'note', a.note, 'details', a.details,
+                 'attachments', coalesce((
+                     select jsonb_agg(jsonb_build_object(
+                              'id', att.id, 'file_name', att.file_name,
+                              'mime_type', att.mime_type, 'size_bytes', att.size_bytes)
+                            order by att.created_at)
+                       from public.mk_assignment_attachments aa
+                       join public.mk_attachments att on att.id = aa.attachment_id
+                      where aa.assignment_id = a.id), '[]'::jsonb)
+               ) order by a.sort, a.created_at)
           from public.mk_assignments a
          where a.employee_id = v_emp_id and a.work_date = v_today), '[]'::jsonb),
     'events', coalesce((
@@ -371,6 +426,42 @@ begin
           from public.mk_events ev
          where ev.employee_id = v_emp_id and ev.event_time >= v_from), '[]'::jsonb)
   );
+end $$;
+
+
+-- Tablet: melyik rajzot nyithatja meg. Csak a mai beosztásához tartozó csatolmány
+-- tárolási útvonalát adja vissza, egyébként hibát dob. A tényleges, rövid lejáratú
+-- linket egy Netlify végpont állítja elő a service role kulccsal; ez a függvény
+-- csak a jogosultságot ellenőrzi (ugyanúgy, mint a többi mk_terminal_* függvény).
+create or replace function public.mk_terminal_attachment_path(p_terminal uuid, p_pin text, p_attachment uuid)
+returns text
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  v_emp   uuid;
+  v_today date := (now() at time zone 'Europe/Budapest')::date;
+  v_path  text;
+begin
+  v_emp := public.mk__pin_employee(p_terminal, p_pin);
+  if v_emp is null then
+    raise exception 'Hibás PIN.';
+  end if;
+
+  select att.storage_path into v_path
+    from public.mk_attachments att
+    join public.mk_assignment_attachments aa on aa.attachment_id = att.id
+    join public.mk_assignments a on a.id = aa.assignment_id
+   where att.id = p_attachment
+     and a.employee_id = v_emp
+     and a.work_date = v_today
+   limit 1;
+
+  if v_path is null then
+    raise exception 'A rajz nem érhető el.';
+  end if;
+  return v_path;
 end $$;
 
 

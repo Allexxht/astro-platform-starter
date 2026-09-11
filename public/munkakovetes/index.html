@@ -147,8 +147,10 @@ button{cursor:pointer}
 .pcell.is-today{background:rgba(255,122,26,.05)}
 .chip{display:flex;align-items:flex-start;gap:4px;padding:4px 2px 4px 8px;border-left:4px solid var(--c);border-radius:6px;
   background:var(--raised);background:color-mix(in srgb,var(--c) 15%,var(--panel));font-size:14px;font-weight:600;line-height:1.25}
+.chip-open{all:unset;flex:1;min-width:0;cursor:pointer}
 .chip-text{flex:1;min-width:0}
 .chip-text small{display:block;font-size:12.5px;font-weight:500;color:var(--muted)}
+.chip-ic{margin-left:3px;font-size:12px;opacity:.85}
 .chip-x{border:0;background:transparent;color:var(--muted);font-size:17px;line-height:1;padding:0 5px;opacity:0}
 .chip:hover .chip-x,.chip-x:focus-visible{opacity:1}
 .cell-add{min-height:28px;border:1px dashed var(--line);border-radius:6px;background:transparent;color:var(--muted);font-size:18px;opacity:.45}
@@ -194,6 +196,12 @@ button{cursor:pointer}
 .tp-item{padding:10px;text-align:left;border:1px solid var(--line);border-left:4px solid var(--c);border-radius:8px;background:var(--raised);font-weight:600}
 .tp-item:hover{border-color:var(--muted);border-left-color:var(--c)}
 .pin-show{margin:0;font-family:var(--cond);font-size:60px;font-weight:700;letter-spacing:.18em;color:var(--hot)}
+.file-drop{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.file-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.file-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+.file-item .fi-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-item .fi-size{color:var(--muted);font-size:12.5px;white-space:nowrap}
+.file-item.is-pending{border-style:dashed;color:var(--muted)}
 .swatches{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 .swatch-pick{width:30px;height:30px;border:2px solid transparent;border-radius:6px;background:var(--c)}
 .swatch-pick.is-on{border-color:var(--chalk)}
@@ -275,8 +283,10 @@ input[type=color]{width:44px;height:32px;padding:0;border:1px solid var(--line);
 .pc-name{font-family:var(--cond);font-weight:700;font-size:1.6em;line-height:1.1}
 .pc-loc{color:var(--muted)}
 .pc-note{font-weight:600}
-.pc-desc{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:.85em;color:var(--muted)}
-.pc-go{align-self:center;flex:none;padding:.7em 1.3em;border-radius:.45em;background:var(--go);color:#07210f;font-size:1.15em;font-weight:700}
+.pc-details{margin:.35em 0 0;font-size:.85em;color:var(--chalk);white-space:pre-wrap}
+.pc-desc-full{margin:.35em 0 0;font-size:.85em;color:var(--muted);white-space:pre-wrap}
+.pc-files{display:flex;flex-direction:column;gap:.4em;margin-top:.6em}
+.pc-go{align-self:center;flex:none;border:0;padding:.7em 1.3em;border-radius:.45em;background:var(--go);color:#07210f;font-size:1.15em;font-weight:700}
 .now-card{display:flex;flex-direction:column;gap:.25em;padding:.9em 1.1em;border:1px solid var(--line);border-left:.45em solid var(--c);border-radius:.6em;background:var(--panel)}
 .now-title{display:flex;align-items:center;flex-wrap:wrap;gap:.4em;font-family:var(--cond);font-weight:700;font-size:1.7em;line-height:1.1}
 .now-title .swatch{width:.55em;height:.55em}
@@ -285,6 +295,23 @@ input[type=color]{width:44px;height:32px;padding:0;border:1px solid var(--line);
 .nc-block{border-left-color:var(--stop);background:var(--stop-bg)}
 .t-info{margin:0;font-size:.9em;color:var(--muted)}
 .t-info b{color:var(--chalk)}
+.t-details{margin:0;font-size:.9em;color:var(--chalk);white-space:pre-wrap}
+.t-details.muted{color:var(--muted)}
+.t-files{display:flex;flex-direction:column;gap:.5em;margin:.2em 0}
+.t-file{background:var(--raised);border-color:var(--line);justify-content:flex-start;text-align:left}
+
+/* Rajz megnyitása: teljes képernyős néző */
+.attview{position:fixed;inset:0;z-index:90;background:#0b0d0f;display:flex;flex-direction:column;color:#eceee8;font-family:var(--font)}
+.attview-head{display:flex;align-items:center;justify-content:space-between;gap:1em;padding:14px 16px;background:#171b1e;border-bottom:1px solid #333;flex:none}
+.attview-name{font-weight:600;font-size:1.15em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.attview-close{flex:none;min-height:2.6em;padding:0 1.3em;font-size:1.1em;background:var(--chalk);color:var(--bg);border:0;border-radius:.5em;font-weight:700}
+.attview-body{flex:1;min-height:0;overflow:hidden;display:flex;align-items:center;justify-content:center;position:relative;touch-action:none}
+.attview-body img,.attview-canvas{max-width:100%;max-height:100%;touch-action:none;transform-origin:center center;will-change:transform;user-select:none;-webkit-user-drag:none}
+.attview-msg{color:#99a6ae;font-size:1.15em;padding:2em;text-align:center}
+.attview-nav{display:flex;align-items:center;justify-content:center;gap:1em;padding:10px;background:#171b1e;border-top:1px solid #333;flex:none}
+.attview-nav button{min-height:2.4em;padding:0 1.1em;border:1px solid #444;border-radius:.5em;background:#242b30;color:#eceee8;font-weight:600}
+.attview-nav button:disabled{opacity:.4}
+.attview-nav span{font-family:var(--cond);font-weight:600;font-size:1.1em}
 
 /* Választók */
 .pick-head{display:flex;align-items:center;gap:1em}
@@ -367,10 +394,16 @@ const CONFIG = {
   PIN_LENGTH: 4,
   SHOW_SATURDAY: true,            // heti tervben hétfő–szombat
   TERMINAL_IDLE_SECONDS: 45,      // ennyi tétlenség után a tablet visszaáll a PIN képernyőre
+  TERMINAL_VIEWER_IDLE_SECONDS: 600, // amíg egy rajz nyitva van, ennyi tétlenség után áll csak vissza
   SHIFT_END_DEFAULT: '14:30',     // irodai lezárásnál ez az alapértelmezett idő korábbi napokra
   OFF_PLAN_REASONS: ['Vezető kérte', 'Anyaghiány a tervezett munkához', 'Gép vagy eszköz nem elérhető', 'Sürgős munka jött', 'Egyéb'],
   BLOCK_REASONS: ['Anyaghiány', 'Gép vagy eszköz hiba', 'Hiányzik a rajz vagy az információ', 'Minőségi probléma', 'Egyéb'],
   TASK_COLORS: ['#ff8f3d', '#5aa9ff', '#c9a27a', '#49b6d6', '#a98bff', '#e58bd1', '#8fb0c8', '#9aa7b0', '#c7cdd1'],
+  ATTACHMENTS_BUCKET: 'mk-rajzok',
+  ATTACHMENT_MAX_MB: 20,
+  ATTACHMENT_ACCEPT: '.pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png',
+  ATTACHMENT_SIGNED_URL_SECONDS: 600,
+  PDFJS_VERSION: '3.11.174',
 };
 
 /* ---------- Segédfüggvények ---------- */
@@ -406,6 +439,9 @@ const loginDisplayName = email => {
   const suffix = '@' + CONFIG.LOGIN_DOMAIN;
   return e.toLowerCase().endsWith(suffix.toLowerCase()) ? e.slice(0, -suffix.length) : e;
 };
+const sanitizeFileName = name => String(name || 'fajl').replace(/[/\\]/g, '_').trim().slice(-180) || 'fajl';
+const fmtBytes = n => { n = Number(n) || 0; return n >= 1024 * 1024 ? `${(n / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`; };
+const isPdfFile = f => /pdf/i.test((f && f.mime_type) || '') || /\.pdf$/i.test((f && f.file_name) || '');
 const byId = list => Object.fromEntries((list || []).map(x => [x.id, x]));
 const groupBy = (list, key) => list.reduce((acc, x) => { (acc[x[key]] = acc[x[key]] || []).push(x); return acc; }, {});
 const clone = o => JSON.parse(JSON.stringify(o));
@@ -488,7 +524,9 @@ function pickFields(table, row) {
 
 /* ---------- DEMÓ adatréteg (memóriában) ---------- */
 function createDemoAdapter() {
-  const db = { teams: [], locations: [], employees: [], tasks: [], terminals: [], assignments: [], events: [], pins: {} };
+  const db = { teams: [], locations: [], employees: [], tasks: [], terminals: [], assignments: [], events: [], pins: {}, attachments: [], assignmentAttachments: [] };
+  const withAttachments = a => ({ ...a, attachments: db.assignmentAttachments.filter(x => x.assignment_id === a.id)
+    .map(x => db.attachments.find(y => y.id === x.attachment_id)).filter(Boolean) });
   const listeners = new Set();
   const notify = what => setTimeout(() => listeners.forEach(fn => fn(what)), 0);
   const DEFAULTS = {
@@ -561,16 +599,75 @@ function createDemoAdapter() {
       return db.employees.filter(e => e.active && db.pins[e.id]).sort(byName).map(e => ({ name: e.name, pin: db.pins[e.id] }));
     },
     async getAssignments(from, to) {
-      return clone(db.assignments.filter(a => a.work_date >= from && a.work_date <= to));
+      return clone(db.assignments.filter(a => a.work_date >= from && a.work_date <= to).map(withAttachments));
     },
     async addAssignments(rows) {
       for (const r of rows) {
         const dup = db.assignments.some(a => a.work_date === r.work_date && a.employee_id === r.employee_id && a.task_id === r.task_id);
-        if (!dup) db.assignments.push({ id: uid(), sort: 0, note: null, ...r });
+        if (!dup) db.assignments.push({ id: uid(), sort: 0, note: null, details: null, ...r });
+      }
+      notify('assignments');
+      const keys = new Set(rows.map(r => r.work_date + '|' + r.employee_id + '|' + r.task_id));
+      return clone(db.assignments.filter(a => keys.has(a.work_date + '|' + a.employee_id + '|' + a.task_id)).map(withAttachments));
+    },
+    async updateAssignment(id, patch) {
+      const row = db.assignments.find(a => a.id === id);
+      if (!row) throw new Error('A beosztás már nem létezik.');
+      Object.assign(row, patch);
+      notify('assignments');
+      return clone(withAttachments(row));
+    },
+    async removeAssignment(id) {
+      db.assignments = db.assignments.filter(a => a.id !== id);
+      db.assignmentAttachments = db.assignmentAttachments.filter(x => x.assignment_id !== id);
+      notify('assignments');
+    },
+    async uploadAttachment(file) {
+      const id = uid();
+      const blobUrl = URL.createObjectURL(file);
+      const row = { id, storage_path: `demo/${id}/${sanitizeFileName(file.name)}`, file_name: file.name, mime_type: file.type || null, size_bytes: file.size, blobUrl };
+      db.attachments.push(row);
+      return clone(row);
+    },
+    async linkAttachments(assignmentId, attachmentIds) {
+      for (const attachment_id of (attachmentIds || [])) {
+        if (!db.assignmentAttachments.some(x => x.assignment_id === assignmentId && x.attachment_id === attachment_id)) {
+          db.assignmentAttachments.push({ assignment_id: assignmentId, attachment_id });
+        }
       }
       notify('assignments');
     },
-    async removeAssignment(id) { db.assignments = db.assignments.filter(a => a.id !== id); notify('assignments'); },
+    async attachmentRefCount(attachmentId) {
+      return db.assignmentAttachments.filter(x => x.attachment_id === attachmentId).length;
+    },
+    async deleteAttachmentIfOrphan(attachmentId) {
+      const n = db.assignmentAttachments.filter(x => x.attachment_id === attachmentId).length;
+      if (n > 0) return false;
+      const idx = db.attachments.findIndex(a => a.id === attachmentId);
+      if (idx >= 0) { try { URL.revokeObjectURL(db.attachments[idx].blobUrl); } catch (e) { /* nem kritikus */ } db.attachments.splice(idx, 1); }
+      return true;
+    },
+    async unlinkAttachment(assignmentId, attachmentId) {
+      db.assignmentAttachments = db.assignmentAttachments.filter(x => !(x.assignment_id === assignmentId && x.attachment_id === attachmentId));
+      notify('assignments');
+      await this.deleteAttachmentIfOrphan(attachmentId);
+    },
+    async officeAttachmentUrl(storagePath) {
+      const att = db.attachments.find(a => a.storage_path === storagePath);
+      if (!att) throw new Error('Nincs ilyen fájl.');
+      return att.blobUrl;
+    },
+    async terminalAttachmentUrl(terminalId, pin, attachmentId) {
+      checkTerminal(terminalId);
+      const emp = empByPin(pin);
+      if (!emp) throw new Error('Hibás PIN.');
+      const day = todayKey();
+      const ok = db.assignments.some(a => a.employee_id === emp.id && a.work_date === day
+        && db.assignmentAttachments.some(x => x.assignment_id === a.id && x.attachment_id === attachmentId));
+      const att = db.attachments.find(a => a.id === attachmentId);
+      if (!ok || !att) throw new Error('A rajz nem érhető el.');
+      return att.blobUrl;
+    },
     async getEvents(fromIso, toIso) {
       const f = Date.parse(fromIso), t = Date.parse(toIso);
       return clone(db.events.filter(e => { const x = Date.parse(e.event_time); return x >= f && x < t; }).sort(byTime));
@@ -590,7 +687,12 @@ function createDemoAdapter() {
       const day = todayKey(), d0 = parseYmd(day).getTime();
       return clone({
         employee: { id: emp.id, name: emp.name },
-        assignments: db.assignments.filter(a => a.employee_id === emp.id && a.work_date === day).map(a => ({ task_id: a.task_id, note: a.note || null })),
+        assignments: db.assignments.filter(a => a.employee_id === emp.id && a.work_date === day).map(a => ({
+          task_id: a.task_id, note: a.note || null, details: a.details || null,
+          attachments: db.assignmentAttachments.filter(x => x.assignment_id === a.id)
+            .map(x => db.attachments.find(y => y.id === x.attachment_id)).filter(Boolean)
+            .map(att => ({ id: att.id, file_name: att.file_name, mime_type: att.mime_type, size_bytes: att.size_bytes })),
+        })),
         events: db.events.filter(e => e.employee_id === emp.id && Date.parse(e.event_time) >= d0).sort(byTime),
       });
     },
@@ -705,6 +807,10 @@ async function createSupabaseAdapter() {
   const sb = mod.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
   const q = async p => { const { data, error } = await p; if (error) throw new Error(error.message); return data; };
   const T = t => 'mk_' + t;
+  const withAttachments = a => {
+    const { mk_assignment_attachments, ...rest } = a;
+    return { ...rest, attachments: (mk_assignment_attachments || []).map(x => x.mk_attachments).filter(Boolean) };
+  };
   return {
     mode: 'live',
     async getSession() { const { data } = await sb.auth.getSession(); return data.session; },
@@ -741,13 +847,67 @@ async function createSupabaseAdapter() {
     },
     async setPin(employeeId, manual) { return q(sb.rpc('mk_set_pin', { p_employee: employeeId, p_pin: manual || null })); },
     async getAssignments(from, to) {
-      return q(sb.from(T('assignments')).select('*').gte('work_date', from).lte('work_date', to).order('sort').order('created_at'));
+      const rows = await q(sb.from(T('assignments')).select('*, mk_assignment_attachments(mk_attachments(*))')
+        .gte('work_date', from).lte('work_date', to).order('sort').order('created_at'));
+      return rows.map(withAttachments);
     },
     async addAssignments(rows) {
-      if (!rows.length) return;
+      if (!rows.length) return [];
       await q(sb.from(T('assignments')).upsert(rows, { onConflict: 'work_date,employee_id,task_id', ignoreDuplicates: true }));
+      const orFilter = rows.map(r => `and(work_date.eq.${r.work_date},employee_id.eq.${r.employee_id},task_id.eq.${r.task_id})`).join(',');
+      const found = await q(sb.from(T('assignments')).select('*, mk_assignment_attachments(mk_attachments(*))').or(orFilter));
+      return found.map(withAttachments);
+    },
+    async updateAssignment(id, patch) {
+      const row = await q(sb.from(T('assignments')).update(patch).eq('id', id).select('*, mk_assignment_attachments(mk_attachments(*))').single());
+      return withAttachments(row);
     },
     async removeAssignment(id) { await q(sb.from(T('assignments')).delete().eq('id', id)); },
+    async uploadAttachment(file) {
+      const path = `${uid()}/${sanitizeFileName(file.name)}`;
+      const up = await sb.storage.from(CONFIG.ATTACHMENTS_BUCKET).upload(path, file, { contentType: file.type || undefined });
+      if (up.error) throw new Error(up.error.message);
+      return q(sb.from(T('attachments')).insert({ storage_path: path, file_name: file.name, mime_type: file.type || null, size_bytes: file.size }).select().single());
+    },
+    async linkAttachments(assignmentId, attachmentIds) {
+      if (!attachmentIds || !attachmentIds.length) return;
+      await q(sb.from(T('assignment_attachments')).upsert(
+        attachmentIds.map(attachment_id => ({ assignment_id: assignmentId, attachment_id })),
+        { onConflict: 'assignment_id,attachment_id', ignoreDuplicates: true }));
+    },
+    async attachmentRefCount(attachmentId) {
+      const { count, error } = await sb.from(T('assignment_attachments')).select('*', { count: 'exact', head: true }).eq('attachment_id', attachmentId);
+      if (error) throw new Error(error.message);
+      return count || 0;
+    },
+    async deleteAttachmentIfOrphan(attachmentId) {
+      const n = await this.attachmentRefCount(attachmentId);
+      if (n > 0) return false;
+      const att = await q(sb.from(T('attachments')).select('*').eq('id', attachmentId).maybeSingle());
+      if (att) {
+        await sb.storage.from(CONFIG.ATTACHMENTS_BUCKET).remove([att.storage_path]);
+        await q(sb.from(T('attachments')).delete().eq('id', attachmentId));
+      }
+      return true;
+    },
+    async unlinkAttachment(assignmentId, attachmentId) {
+      await q(sb.from(T('assignment_attachments')).delete().eq('assignment_id', assignmentId).eq('attachment_id', attachmentId));
+      await this.deleteAttachmentIfOrphan(attachmentId);
+    },
+    async officeAttachmentUrl(storagePath) {
+      const { data, error } = await sb.storage.from(CONFIG.ATTACHMENTS_BUCKET).createSignedUrl(storagePath, CONFIG.ATTACHMENT_SIGNED_URL_SECONDS);
+      if (error) throw new Error(error.message);
+      return data.signedUrl;
+    },
+    async terminalAttachmentUrl(terminalId, pin, attachmentId) {
+      const res = await fetch('/api/mk-attachment-url', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ terminal: terminalId, pin, attachment: attachmentId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.url) throw new Error(data.error || 'Nem sikerült megnyitni a rajzot.');
+      return data.url;
+    },
     async getEvents(fromIso, toIso) {
       return q(sb.from(T('events')).select('*').gte('event_time', fromIso).lt('event_time', toIso).order('event_time'));
     },
@@ -1049,7 +1209,8 @@ function renderPlan() {
     return `<div class="pcell${key === today ? ' is-today' : ''}">
       ${list.map(a => {
         const t = m.task[a.task_id] || { name: 'Törölt feladat', color: '#9aa7b0' };
-        return `<span class="chip" style="--c:${esc(t.color)}"><span class="chip-text">${esc(t.name)}${a.note ? `<small>${esc(a.note)}</small>` : ''}</span><button class="chip-x" data-act="unassign" data-id="${a.id}" aria-label="${esc(t.name)} törlése">×</button></span>`;
+        const icons = `${a.details ? '<span class="chip-ic" title="Van leírás">📝</span>' : ''}${(a.attachments && a.attachments.length) ? `<span class="chip-ic" title="${a.attachments.length} rajz csatolva">📎</span>` : ''}`;
+        return `<span class="chip" style="--c:${esc(t.color)}"><button type="button" class="chip-open" data-act="assign-edit" data-id="${a.id}"><span class="chip-text">${esc(t.name)}${icons}${a.note ? `<small>${esc(a.note)}</small>` : ''}</span></button><button class="chip-x" data-act="unassign" data-id="${a.id}" aria-label="${esc(t.name)} törlése">×</button></span>`;
       }).join('')}
       <button class="cell-add" data-act="assign" data-emp="${e.id}" data-date="${key}" aria-label="Feladat hozzáadása: ${esc(e.name)}, ${esc(DAY_NAMES[dayIdx(d)])}">+</button>
     </div>`;
@@ -1075,37 +1236,155 @@ function renderPlan() {
   </section>`;
 }
 
-function assignModal(empId, date) {
-  const e = M().emp[empId];
+/* Beosztás ablak: "+" gombra új beosztás (leírás, rajz, feladat választás), chipre kattintva
+   ugyanez az ablak szerkesztésre (leírás, rajz módosítása, a feladat marad). */
+function openAssignmentModal({ mode, empId, date, assignmentId }) {
+  const editing = mode === 'edit';
+  const existing = editing ? S.plan.assignments.find(a => a.id === assignmentId) : null;
+  if (editing && !existing) return;
+  const eId = editing ? existing.employee_id : empId;
+  const e = M().emp[eId];
   if (!e) return;
-  const d = parseYmd(date);
+  const workDate = editing ? existing.work_date : date;
+  const d = parseYmd(workDate);
   const days = planDays();
-  const tasks = S.master.tasks.filter(t => t.active);
-  const groups = groupTasksByLocation(tasks, S.master.locations);
-  openModal({
-    title: `${e.name}, ${DAY_NAMES[dayIdx(d)]} (${fmtDateShort(d)})`,
-    body: `
-      <label class="field"><span>Megjegyzés (nem kötelező)</span><input type="text" id="f-note" maxlength="120" placeholder="pl. rendelésszám, konténer azonosító"></label>
-      <label class="check"><input type="checkbox" id="f-week"> Ugyanez a hét minden napjára (${days.length === 6 ? 'hétfő–szombat' : 'hétfő–péntek'})</label>
-      ${tasks.length ? `<div class="task-picker">${groups.map(([name, list]) => `<div class="tp-group"><h3>${esc(name)}</h3><div class="tp-list">
-        ${list.map(t => `<button class="tp-item" data-task="${t.id}" style="--c:${esc(t.color)}">${esc(t.name)}</button>`).join('')}</div></div>`).join('')}</div>`
-        : '<p>Még nincs feladat. A Törzsadatok oldalon tudsz felvenni.</p>'}`,
-    onMount: modal => {
-      modal.addEventListener('click', async ev => {
-        const b = ev.target.closest('.tp-item');
-        if (!b || b.disabled) return;
-        const note = $('#f-note', modal).value.trim() || null;
-        const dates = $('#f-week', modal).checked ? days.map(ymd) : [date];
-        b.disabled = true;
-        try {
-          await S.api.addAssignments(dates.map(wd => ({ work_date: wd, employee_id: empId, task_id: b.dataset.task, note })));
-          closeModal(modal);
-          toast(dates.length > 1 ? 'Beosztva a hét minden napjára' : 'Beosztva');
-          await reloadPlan();
-        } catch (err) { showModalError(modal, err); b.disabled = false; }
-      });
+  const task = editing ? M().task[existing.task_id] : null;
+
+  const state = {
+    attachments: editing ? clone(existing.attachments || []) : [],   // {id, file_name, mime_type, size_bytes, storage_path}
+    pending: [],                                                     // új feltöltés, még nincs beosztáshoz kötve (csak "new" módban)
+    uploading: false,
+    linked: false,
+  };
+
+  const fileListHtml = () => {
+    const items = editing ? state.attachments : state.pending;
+    if (!items.length) return '';
+    return `<ul class="file-list" id="f-files">${items.map(f => `<li class="file-item" data-att="${f.id}">
+      <span class="fi-name">${esc(f.file_name)}</span><span class="fi-size">${fmtBytes(f.size_bytes)}</span>
+      <button type="button" class="btn small ghost" data-fa="open" data-id="${f.id}">Megnyitás</button>
+      <button type="button" class="btn small ghost" data-fa="del" data-id="${f.id}">Törlés</button>
+    </li>`).join('')}</ul>`;
+  };
+
+  const body = () => `
+    ${editing ? `<p class="muted small">Feladat: <b style="color:var(--chalk)">${esc(task ? task.name : 'Törölt feladat')}</b>, ${esc(DAY_NAMES[dayIdx(d)])} (${esc(fmtDateShort(d))})</p>` : ''}
+    <label class="field"><span>Megjegyzés (nem kötelező)</span><input type="text" id="f-note" maxlength="120" value="${esc((existing && existing.note) || '')}" placeholder="pl. rendelésszám, konténer azonosító"></label>
+    <label class="field"><span>Leírás, tudnivalók</span><textarea id="f-details" rows="4" maxlength="2000" placeholder="Amit a dolgozónak a tableten tudnia kell erről a munkáról">${esc((existing && existing.details) || '')}</textarea></label>
+    <div class="field"><span>Rajz</span>
+      <div class="file-drop">
+        <button type="button" class="btn" id="f-attach">Rajz csatolása</button>
+        <span class="muted small" id="f-upload-status"></span>
+      </div>
+      <div id="f-file-area">${fileListHtml()}</div>
+      <input type="file" id="f-file-input" accept="${CONFIG.ATTACHMENT_ACCEPT}" multiple hidden>
+    </div>
+    ${editing ? '' : `<label class="check"><input type="checkbox" id="f-week"> Ugyanez a hét minden napjára (${days.length === 6 ? 'hétfő–szombat' : 'hétfő–péntek'})</label>
+      ${(() => {
+        const tasks = S.master.tasks.filter(t => t.active);
+        const groups = groupTasksByLocation(tasks, S.master.locations);
+        return tasks.length ? `<div class="task-picker">${groups.map(([name, list]) => `<div class="tp-group"><h3>${esc(name)}</h3><div class="tp-list">
+          ${list.map(t => `<button class="tp-item" data-task="${t.id}" style="--c:${esc(t.color)}">${esc(t.name)}</button>`).join('')}</div></div>`).join('')}</div>`
+          : '<p>Még nincs feladat. A Törzsadatok oldalon tudsz felvenni.</p>';
+      })()}`}`;
+
+  const modal = openModal({
+    title: editing ? `${e.name}: beosztás szerkesztése` : `${e.name}, ${DAY_NAMES[dayIdx(d)]} (${fmtDateShort(d)})`,
+    body: body(),
+    actions: editing ? [{ label: 'Bezárás' }, {
+      label: 'Mentés', primary: true, onClick: async m2 => {
+        const note = $('#f-note', m2).value.trim() || null;
+        const details = $('#f-details', m2).value.trim() || null;
+        await S.api.updateAssignment(assignmentId, { note, details });
+        toast('Mentve');
+        await reloadPlan();
+      },
+    }] : [{ label: 'Mégse' }],
+    onMount: m2 => wireFileArea(m2),
+    onClose: () => {
+      if (!editing) state.pending.forEach(p => { S.api.deleteAttachmentIfOrphan(p.id).catch(() => {}); });
     },
   });
+
+  function refreshFileArea(m2) {
+    $('#f-file-area', m2).innerHTML = fileListHtml();
+  }
+
+  function wireFileArea(m2) {
+    $('#f-attach', m2).addEventListener('click', () => $('#f-file-input', m2).click());
+    $('#f-file-input', m2).addEventListener('change', async ev => {
+      const files = Array.from(ev.target.files || []);
+      ev.target.value = '';
+      if (!files.length) return;
+      const statusEl = $('#f-upload-status', m2);
+      for (const file of files) {
+        const extOk = new RegExp('\\.(pdf|jpe?g|png)$', 'i').test(file.name) || /pdf|jpeg|jpg|png/i.test(file.type);
+        if (!extOk) { toast(`${file.name}: csak PDF, JPG vagy PNG tölthető fel.`); continue; }
+        if (file.size > CONFIG.ATTACHMENT_MAX_MB * 1024 * 1024) { toast(`${file.name}: túl nagy (max. ${CONFIG.ATTACHMENT_MAX_MB} MB).`); continue; }
+        statusEl.textContent = `Feltöltés: ${file.name}…`;
+        try {
+          const att = await S.api.uploadAttachment(file);
+          if (editing) {
+            await S.api.linkAttachments(assignmentId, [att.id]);
+            state.attachments.push(att);
+          } else {
+            state.pending.push(att);
+          }
+          refreshFileArea(m2);
+        } catch (err) { toast(`${file.name}: ${(err && err.message) || err}`); }
+      }
+      statusEl.textContent = '';
+    });
+    m2.addEventListener('click', async ev => {
+      const fa = ev.target.closest('[data-fa]');
+      if (fa) {
+        const id = fa.dataset.id;
+        const list = editing ? state.attachments : state.pending;
+        const f = list.find(x => x.id === id);
+        if (!f) return;
+        if (fa.dataset.fa === 'open') {
+          fa.disabled = true;
+          try {
+            const url = await S.api.officeAttachmentUrl(f.storage_path);
+            window.open(url, '_blank', 'noopener');
+          } catch (err) { toast('Nem sikerült megnyitni: ' + ((err && err.message) || err)); }
+          fa.disabled = false;
+        } else if (fa.dataset.fa === 'del') {
+          fa.disabled = true;
+          try {
+            if (editing) {
+              await S.api.unlinkAttachment(assignmentId, id);
+              state.attachments = state.attachments.filter(x => x.id !== id);
+            } else {
+              await S.api.deleteAttachmentIfOrphan(id);
+              state.pending = state.pending.filter(x => x.id !== id);
+            }
+            refreshFileArea(m2);
+          } catch (err) { toast('Nem sikerült törölni: ' + ((err && err.message) || err)); }
+          fa.disabled = false;
+        }
+        return;
+      }
+      if (editing) return;
+      const b = ev.target.closest('.tp-item');
+      if (!b || b.disabled) return;
+      const note = $('#f-note', m2).value.trim() || null;
+      const details = $('#f-details', m2).value.trim() || null;
+      const dates = $('#f-week', m2).checked ? days.map(ymd) : [date];
+      b.disabled = true;
+      try {
+        const created = await S.api.addAssignments(dates.map(wd => ({ work_date: wd, employee_id: empId, task_id: b.dataset.task, note, details })));
+        if (state.pending.length) {
+          for (const row of created) await S.api.linkAttachments(row.id, state.pending.map(p => p.id));
+        }
+        state.linked = true;
+        closeModal(m2);
+        toast(dates.length > 1 ? 'Beosztva a hét minden napjára' : 'Beosztva');
+        await reloadPlan();
+      } catch (err) { showModalError(m2, err); b.disabled = false; }
+    });
+  }
+  return modal;
 }
 
 async function copyPrevWeek() {
@@ -1117,10 +1396,17 @@ async function copyPrevWeek() {
   if (!prev.length) { toast('Az előző héten nincs beosztás, nincs mit másolni.'); return; }
   openModal({
     title: 'Előző hét másolása',
-    body: `<p>${prev.length} beosztást másolok át az előző hétről (${esc(fmtDateShort(prevMon))} kezdettel) erre a hétre. A meglévő beosztások megmaradnak, ami már szerepel, azt kihagyom.</p>`,
+    body: `<p>${prev.length} beosztást másolok át az előző hétről (${esc(fmtDateShort(prevMon))} kezdettel) erre a hétre, a leírással és a csatolt rajzokkal együtt. A meglévő beosztások megmaradnak, ami már szerepel, azt kihagyom.</p>`,
     actions: [{ label: 'Mégse' }, {
       label: 'Másolás', primary: true, onClick: async () => {
-        await S.api.addAssignments(prev.map(a => ({ work_date: ymd(addDays(parseYmd(a.work_date), 7)), employee_id: a.employee_id, task_id: a.task_id, note: a.note || null })));
+        const rows = prev.map(a => ({ work_date: ymd(addDays(parseYmd(a.work_date), 7)), employee_id: a.employee_id, task_id: a.task_id, note: a.note || null, details: a.details || null }));
+        const created = await S.api.addAssignments(rows);
+        for (const a of prev) {
+          if (!a.attachments || !a.attachments.length) continue;
+          const nd = ymd(addDays(parseYmd(a.work_date), 7));
+          const match = created.find(c => c.work_date === nd && c.employee_id === a.employee_id && c.task_id === a.task_id);
+          if (match) await S.api.linkAttachments(match.id, a.attachments.map(x => x.id));
+        }
         toast('Előző hét átmásolva');
         await reloadPlan();
       },
@@ -1428,13 +1714,21 @@ async function renderTerminalTab() {
 function stopTerminalTimers() {
   const t = S.term;
   if (!t) return;
+  removeViewerNode(t);
   Object.values(t.timers).forEach(x => { clearInterval(x); clearTimeout(x); });
   t.timers = {};
 }
 
+function removeViewerNode(t) {
+  if (t && t.viewer) {
+    if (t.viewer.node && t.viewer.node.parentNode) t.viewer.node.parentNode.removeChild(t.viewer.node);
+    t.viewer = null;
+  }
+}
+
 async function startTerminal(terminalId, el) {
   stopTerminalTimers();
-  S.term = { id: terminalId, el, cat: null, screen: 'pin', pin: '', ses: null, flow: null, busy: false, err: null, done: null, shake: false, timers: {} };
+  S.term = { id: terminalId, el, cat: null, screen: 'pin', pin: '', ses: null, flow: null, busy: false, err: null, done: null, shake: false, timers: {}, viewer: null };
   el.onclick = onTermClick;
   try {
     S.term.cat = await S.api.terminalCatalog(terminalId);
@@ -1503,12 +1797,16 @@ function termHome() {
     return `${head}<p class="t-lead">${intro}</p>
       <div class="plan-cards">${planned.map(a => {
         const task = tTask(a.task_id);
-        return `<button class="plan-card" data-t="start-planned" data-task="${task.id}" style="--c:${esc(task.color)}">
-          <span class="pc-main"><span class="pc-name">${esc(task.name)}</span>
+        const atts = a.attachments || [];
+        return `<div class="plan-card" style="--c:${esc(task.color)}">
+          <div class="pc-main"><span class="pc-name">${esc(task.name)}</span>
             ${tLocName(task) ? `<span class="pc-loc">${esc(tLocName(task))}</span>` : ''}
             ${a.note ? `<span class="pc-note">${esc(a.note)}</span>` : ''}
-            ${task.description ? `<span class="pc-desc">${esc(task.description)}</span>` : ''}</span>
-          <span class="pc-go">Kezdés</span></button>`;
+            ${a.details ? `<p class="pc-details">${esc(a.details)}</p>` : ''}
+            ${task.description ? `<p class="pc-desc-full">${esc(task.description)}</p>` : ''}
+            ${atts.length ? `<div class="pc-files">${atts.map(att => `<button class="t-btn t-file" data-t="open-file" data-att="${att.id}">📎 Rajz megnyitása${atts.length > 1 ? ': ' + esc(att.file_name) : ''}</button>`).join('')}</div>` : ''}
+          </div>
+          <button class="pc-go" data-t="start-planned" data-task="${task.id}">Kezdés</button></div>`;
       }).join('')}</div>
       <div class="t-row"><button class="t-btn" data-t="other">${planned.length ? 'Mást csinálok' : 'Feladat kiválasztása'}</button></div>`;
   }
@@ -1516,13 +1814,12 @@ function termHome() {
   const since = fmtTime(st.since);
   const color = esc(cur ? cur.color : '#9aa7b0');
   const taskTitle = cur ? `<span class="swatch" style="--c:${color}"></span>${esc(cur.name)}` : 'Ismeretlen feladat';
+  const info = termInfoBlock(ses, st, cur);
   if (st.state === 'work') {
-    const a = ses.assignments.find(x => x.task_id === st.taskId);
-    const info = [a && a.note ? `<b>${esc(a.note)}</b>` : '', cur && cur.description ? esc(cur.description) : ''].filter(Boolean).join(' ');
     return `${head}
       <div class="now-card" style="--c:${color}"><span class="now-title">${taskTitle}</span>
         <span class="now-sub">${tLocName(cur) ? esc(tLocName(cur)) + ', ' : ''}${since} óta. Ma eddig ${fmtDur(st.workMin)} munka.</span></div>
-      ${info ? `<p class="t-info">${info}</p>` : ''}
+      ${info}
       <div class="t-actions">
         <button class="t-btn t-switch" data-t="switch">Feladatváltás</button>
         <button class="t-btn t-pause" data-t="pause">Szünet</button>
@@ -1534,6 +1831,7 @@ function termHome() {
     return `${head}
       <div class="now-card nc-pause"><span class="now-title">Szüneten vagy</span>
         <span class="now-sub">${since} óta. Utána ezt folytatod: ${esc(cur ? cur.name : '')}</span></div>
+      ${info}
       <div class="t-actions">
         <button class="t-btn t-go" data-t="resume">Folytatom a munkát</button>
         <button class="t-btn t-end" data-t="end">Műszak vége</button>
@@ -1542,11 +1840,21 @@ function termHome() {
   return `${head}
     <div class="now-card nc-block"><span class="now-title">Elakadás jelezve: ${esc(st.blockReason || 'ok nélkül')}</span>
       <span class="now-sub">${since} óta. Az iroda látja a jelzést. Feladat: ${esc(cur ? cur.name : '')}</span></div>
+    ${info}
     <div class="t-actions three">
       <button class="t-btn t-go" data-t="resume">Megoldódott, folytatom</button>
       <button class="t-btn t-switch" data-t="switch">Feladatváltás</button>
       <button class="t-btn t-end" data-t="end">Műszak vége</button>
     </div>`;
+}
+
+function termInfoBlock(ses, st, cur) {
+  const a = ses.assignments.find(x => x.task_id === st.taskId);
+  const atts = (a && a.attachments) || [];
+  return `${a && a.note ? `<p class="t-info"><b>${esc(a.note)}</b></p>` : ''}
+    ${a && a.details ? `<p class="t-details">${esc(a.details)}</p>` : ''}
+    ${cur && cur.description ? `<p class="t-details muted">${esc(cur.description)}</p>` : ''}
+    ${atts.length ? `<div class="t-files">${atts.map(att => `<button class="t-btn t-file" data-t="open-file" data-att="${att.id}">📎 Rajz megnyitása${atts.length > 1 ? ': ' + esc(att.file_name) : ''}</button>`).join('')}</div>` : ''}`;
 }
 
 function termPick() {
@@ -1621,6 +1929,7 @@ function bumpIdle() {
 function termReset() {
   const t = S.term;
   if (!t) return;
+  removeViewerNode(t);
   clearTimeout(t.timers.idle);
   clearTimeout(t.timers.done);
   Object.assign(t, { screen: 'pin', pin: '', ses: null, flow: null, busy: false, err: null, done: null, shake: false });
@@ -1628,6 +1937,157 @@ function termReset() {
 }
 
 function termGo(screen) { const t = S.term; t.screen = screen; t.err = null; renderTerm(); bumpIdle(); }
+
+/* --- Rajz megnyitása: teljes képernyős néző (kép pinch-zoommal, PDF PDF.js-sel, lapozással) --- */
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) return resolve();
+    const s = document.createElement('script');
+    s.src = src; s.onload = () => resolve(); s.onerror = () => reject(new Error('Nem sikerült betölteni a megjelenítőt.'));
+    document.head.appendChild(s);
+  });
+}
+async function ensurePdfJs() {
+  if (window.pdfjsLib) return window.pdfjsLib;
+  const v = CONFIG.PDFJS_VERSION;
+  await loadScript(`https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${v}/pdf.min.js`);
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${v}/pdf.worker.min.js`;
+  return window.pdfjsLib;
+}
+
+// Egyszerű kétujjas nagyítás és húzás (pan) érintőképernyőn, dupla koppintásra visszaáll.
+function setupPinchZoom(container, target) {
+  if (!container || !target) return;
+  let scale = 1, tx = 0, ty = 0, startDist = 0, startScale = 1, panStart = null;
+  const apply = () => { target.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`; };
+  const dist = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+  container.addEventListener('touchstart', ev => {
+    if (ev.touches.length === 2) { startDist = dist(ev.touches[0], ev.touches[1]); startScale = scale; }
+    else if (ev.touches.length === 1) { panStart = { x: ev.touches[0].clientX - tx, y: ev.touches[0].clientY - ty }; }
+  }, { passive: true });
+  container.addEventListener('touchmove', ev => {
+    if (ev.touches.length === 2 && startDist) {
+      ev.preventDefault();
+      scale = Math.min(5, Math.max(1, startScale * (dist(ev.touches[0], ev.touches[1]) / startDist)));
+      apply();
+    } else if (ev.touches.length === 1 && panStart && scale > 1) {
+      ev.preventDefault();
+      tx = ev.touches[0].clientX - panStart.x; ty = ev.touches[0].clientY - panStart.y;
+      apply();
+    }
+  }, { passive: false });
+  container.addEventListener('touchend', ev => {
+    if (ev.touches.length === 0) { startDist = 0; panStart = null; if (scale <= 1) { scale = 1; tx = 0; ty = 0; apply(); } }
+  });
+  container.addEventListener('dblclick', () => { scale = scale > 1 ? 1 : 2; tx = 0; ty = 0; apply(); });
+}
+
+async function openAttachmentViewer(attachmentId) {
+  const t = S.term;
+  if (!t || !t.ses) return;
+  removeViewerNode(t);
+  const a = (t.ses.assignments || []).find(x => (x.attachments || []).some(f => f.id === attachmentId));
+  const file = a && a.attachments.find(f => f.id === attachmentId);
+  const node = document.createElement('div');
+  node.className = 'attview';
+  document.body.appendChild(node);
+  t.viewer = { id: attachmentId, file, loading: true, error: null, url: null, isPdf: file ? isPdfFile(file) : false, page: 1, numPages: 1, pdf: null, node };
+  clearTimeout(t.timers.idle);
+  t.timers.idle = setTimeout(termReset, CONFIG.TERMINAL_VIEWER_IDLE_SECONDS * 1000);
+  node.addEventListener('click', ev => {
+    if (ev.target.closest('[data-avclose]')) closeAttachmentViewer();
+    else if (ev.target.closest('[data-avprev]')) viewerPage(-1);
+    else if (ev.target.closest('[data-avnext]')) viewerPage(1);
+  });
+  renderViewer();
+  try {
+    const url = await S.api.terminalAttachmentUrl(t.id, t.pin, attachmentId);
+    if (!t.viewer) return;                          // időközben bezárták
+    t.viewer.url = url; t.viewer.loading = false;
+    renderViewer();
+    if (t.viewer.isPdf) await loadPdf(url);
+    else { renderViewer(); setupPinchZoom(node.querySelector('.attview-body'), node.querySelector('.attview-body img')); }
+  } catch (e) {
+    if (!t.viewer) return;
+    t.viewer.loading = false; t.viewer.error = friendlyErr(e);
+    renderViewer();
+  }
+}
+
+function closeAttachmentViewer() {
+  const t = S.term;
+  if (!t || !t.viewer) return;
+  removeViewerNode(t);
+  bumpIdle();
+}
+
+function renderViewer() {
+  const t = S.term;
+  if (!t || !t.viewer) return;
+  const v = t.viewer;
+  const name = (v.file && v.file.file_name) || 'Rajz';
+  v.node.innerHTML = `
+    <div class="attview-head"><span class="attview-name">${esc(name)}</span><button class="attview-close" data-avclose>Bezárás</button></div>
+    <div class="attview-body">
+      ${v.loading ? '<p class="attview-msg">Betöltés…</p>'
+        : v.error ? `<p class="attview-msg">${esc(v.error)}</p>`
+        : v.isPdf ? '<canvas class="attview-canvas"></canvas>'
+        : `<img src="${esc(v.url)}" alt="${esc(name)}">`}
+    </div>
+    ${(!v.loading && !v.error && v.isPdf) ? `<div class="attview-nav">
+      <button data-avprev ${v.page <= 1 ? 'disabled' : ''}>‹ Előző</button>
+      <span>${v.page}. / ${v.numPages}</span>
+      <button data-avnext ${v.page >= v.numPages ? 'disabled' : ''}>Következő ›</button>
+    </div>` : ''}`;
+}
+
+async function loadPdf(url) {
+  const t = S.term;
+  try {
+    const pdfjsLib = await ensurePdfJs();
+    if (!t.viewer) return;
+    const doc = await pdfjsLib.getDocument(url).promise;
+    if (!t.viewer) return;
+    t.viewer.pdf = doc;
+    t.viewer.numPages = doc.numPages;
+    await renderPdfPage();
+  } catch (e) {
+    if (!t.viewer) return;
+    t.viewer.error = 'Nem sikerült megjeleníteni a PDF-et.';
+    renderViewer();
+  }
+}
+
+async function renderPdfPage() {
+  const t = S.term;
+  const v = t && t.viewer;
+  if (!v || !v.pdf) return;
+  const page = await v.pdf.getPage(v.page);
+  if (!t.viewer) return;
+  renderViewer();
+  const canvas = v.node.querySelector('.attview-canvas');
+  const container = v.node.querySelector('.attview-body');
+  if (!canvas || !container) return;
+  const dpr = window.devicePixelRatio || 1;
+  const viewport0 = page.getViewport({ scale: 1 });
+  const fit = Math.min(container.clientWidth / viewport0.width, container.clientHeight / viewport0.height) || 1;
+  const viewport = page.getViewport({ scale: fit * dpr });
+  canvas.width = viewport.width; canvas.height = viewport.height;
+  canvas.style.width = (viewport.width / dpr) + 'px';
+  canvas.style.height = (viewport.height / dpr) + 'px';
+  await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+  setupPinchZoom(container, canvas);
+}
+
+function viewerPage(delta) {
+  const t = S.term;
+  const v = t && t.viewer;
+  if (!v || !v.pdf) return;
+  const np = v.page + delta;
+  if (np < 1 || np > v.numPages) return;
+  v.page = np;
+  renderPdfPage();
+}
 
 async function termDigit(d) {
   const t = S.term;
@@ -1732,13 +2192,14 @@ function onTermClick(ev) {
     case 'qty-skip': f.quantity = null; return afterQty();
     case 'qty-ok': f.quantity = Number(f.qtyInput); return afterQty();
     case 'confirm-end': return termSend({ type: 'end', task: tStatus().taskId });
+    case 'open-file': return openAttachmentViewer(b.dataset.att);
   }
 }
 
 /* ---------- Modal és toast ---------- */
 let currentModal = null;
 
-function openModal({ title, body, actions = [], onMount }) {
+function openModal({ title, body, actions = [], onMount, onClose }) {
   const root = $('#modal-root');
   root.innerHTML = `<div class="backdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="m-title">
     <header class="modal-head"><h2 id="m-title">${esc(title)}</h2><button class="icon-btn" data-mclose aria-label="Bezárás">×</button></header>
@@ -1747,6 +2208,7 @@ function openModal({ title, body, actions = [], onMount }) {
   </div></div>`;
   const backdrop = root.firstElementChild;
   const modal = backdrop.firstElementChild;
+  modal._onClose = onClose || null;
   currentModal = modal;
   backdrop.addEventListener('click', async ev => {
     if (ev.target === backdrop || ev.target.closest('[data-mclose]')) return closeModal(modal);
@@ -1766,6 +2228,7 @@ function openModal({ title, body, actions = [], onMount }) {
 
 function closeModal(modal) {
   if (modal && modal !== currentModal) return;
+  if (modal && modal._onClose) { try { modal._onClose(); } catch (e) { /* nem kritikus */ } }
   $('#modal-root').innerHTML = '';
   currentModal = null;
 }
@@ -1828,8 +2291,16 @@ const ACTIONS = {
   'plan-next': () => { S.plan.monday = ymd(addDays(parseYmd(S.plan.monday), 7)); return reloadPlan(); },
   'plan-this': () => { S.plan.monday = ymd(mondayOf(new Date())); return reloadPlan(); },
   'plan-copy': () => copyPrevWeek(),
-  'assign': el => assignModal(el.dataset.emp, el.dataset.date),
-  'unassign': async el => { el.disabled = true; await S.api.removeAssignment(el.dataset.id); await reloadPlan(); },
+  'assign': el => openAssignmentModal({ mode: 'new', empId: el.dataset.emp, date: el.dataset.date }),
+  'unassign': async el => {
+    el.disabled = true;
+    const row = S.plan.assignments.find(a => a.id === el.dataset.id);
+    const attIds = (row && row.attachments || []).map(x => x.id);
+    await S.api.removeAssignment(el.dataset.id);
+    for (const id of attIds) { try { await S.api.deleteAttachmentIfOrphan(id); } catch (e) { /* nem kritikus */ } }
+    await reloadPlan();
+  },
+  'assign-edit': el => openAssignmentModal({ mode: 'edit', assignmentId: el.dataset.id }),
   'admin-tab': el => { S.admin.tab = el.dataset.v; renderAdmin(); },
   'emp-new': () => employeeModal(null),
   'emp-edit': el => employeeModal(el.dataset.id),
