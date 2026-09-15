@@ -7,6 +7,8 @@ Munkakövető rendszer (MES-lite) a hegesztőüzemnek. Két felülete van:
 
 A bevezetés ütemekben halad. Most az MVP kész, és az ötletek menet közben alakulnak át: ami nem válik be, azt kivesszük.
 
+**Irányváltás (2026. szeptember):** a cél már nem csak a BREMAT belső rendszere, hanem több cégnek eladható, cégenkénti éves licencdíjas termék. A teljes terv a „Többbérlős SaaS – terv” szakaszban van; **ehhez még nem készült kód**, ez a szakasz a következő fejlesztési kör hivatkozási pontja.
+
 ## Fájlok
 - `public/munkakovetes/index.html` – egyfájlos app (vanilla JS, nincs build lépés, CSS és JS inline, kommentfejlécekkel tagolva). A script elején van a `CONFIG`. Üres Supabase kulcsokkal DEMÓ módban fut, memóriában tárolt mintaadatokkal. Az Astro starter a `public/` mappát változtatás nélkül átmásolja, így az app a `/munkakovetes/` útvonalon szolgálódik ki.
 - `src/pages/api/mk-attachment-url.ts` – Astro API endpoint (Netlify functionként fut). A tablet (anon) ezen keresztül kér rövid lejáratú (10 perces) signed URL-t egy csatolt rajzhoz. Ő az egyetlen hely, ahol a Supabase service role kulcs (env var) használva van.
@@ -51,6 +53,92 @@ A bevezetés ütemekben halad. Most az MVP kész, és az ötletek menet közben 
 - Tablet: kesztyűs kézre méretezett gombok, egy művelet legfeljebb 2–3 érintés. 45 mp tétlenség után visszaáll a PIN képernyőre – kivéve, amíg egy rajz nyitva van, akkor 10 perc (`CONFIG.TERMINAL_VIEWER_IDLE_SECONDS`).
 - Rajz megjelenítő (tablet): teljes képernyős, az appon belül. Kép: `<img>` + saját pinch-zoom/pan (érintésfigyeléssel, nem natív böngésző zoom). PDF: PDF.js (cdnjs, `CONFIG.PDFJS_VERSION`), lapozással, canvas-ra rajzolva, ugyanazzal a pinch-zoommal.
 
+## Többbérlős SaaS – terv (2026. szeptember 15.)
+
+Ez a szakasz a megbeszélt, eldöntött irányt írja le a BREMAT-specifikus belső rendszerből eladható, több céges termékké váláshoz. **Még nem készült hozzá kód** – ez a következő fejlesztési kör tervezési alapja.
+
+### Cégazonosítás az adatmodellben – ez épül MOST, a fizikai szétválasztás kérdésétől függetlenül
+Minden `mk_` táblához egy `company_id` oszlop kerül (denormalizáltan, még ott is, ahol JOIN-nal levezethető lenne – egyszerűbb és gyorsabb RLS-t/indexet ad). Ehhez tartozik:
+- `mk_companies` (cég neve, licenc-lejárat, `active` kézi kapcsoló, a dátumtól függetlenül).
+- `mk_profiles` (`user_id` → `auth.users.id`, `company_id`, `role`: `owner`/`office`/`location`, `location_id` csak `location` szerepkörnél).
+- `mk_platform_admins` (`user_id`) – **külön** tábla, szándékosan nem a `mk_profiles`-ban, hogy a rendszergazda-jog sose keveredjen a céges szerepkör-logikával.
+- RLS minden táblán: `company_id = mk_current_company()` (egy `security definer stable` segédfüggvény, ami a hívó `auth.uid()`-jéhez tartozó `mk_profiles` sorból olvas). A `company_id`-t sose fogadjuk el a klienstől – egy `before insert` trigger mindig felülírja, a `with check` csak védőháló.
+- **A tablet `security definer` RPC-i (`mk_terminal_*`, `mk_archive_*`, `mk_set_pin`) megkerülik az RLS-t** – ezekben KÉZZEL, minden lekérdezésben kell a `company_id` szűrés, ez a legkritikusabb kockázati pont. Ide **kettős védelem** kerül: a lekérdezés eleve szűrt, *és* a visszaadás előtt egy explicit ellenőrzés (ha mégis más cég sora jönne vissza, dobjon hibát).
+- **PIN-egyediség céges hatókörre vált** – ma globálisan egyedi (4 jegyű PIN, 10 000 lehetőség, egyetlen cégnél nem ütközik, de több cégnél garantáltan lesz kollízió). A `mk_pins` és a PIN-keresés/egyediség-ellenőrzés cégen belülire szűkül.
+- **Storage:** a `mk-rajzok` bucket tárolási útvonala `<company_id>/<uuid>/<fájlnév>` sémára vált, a storage policy a mappa első szegmensét hasonlítja `mk_current_company()`-hoz.
+- **Kötelező, automatizált kereszt-teszt**: két próba-cég, minden deploy előtt lefutó teszt, ami megpróbálja az egyikkel "meglátni" a másikat minden felületen és minden RPC-n. Ez nem opció, ez kapu – RLS/RPC-változás nem mehet éles ágba, amíg ez nem zöld.
+
+### Két lehetséges út a cégek fizikai szétválasztására – a döntés elhalasztva a 2. ügyfélig
+Az első ügyfél (BREMAT) saját, a Valk logbooktól leválasztott Supabase projektben van egyedül – **jelenleg nincs is különbség a két út között**, mert egy projektben egy cég van. A döntést a 2. ügyfél tényleges megjelenésekor hozzuk meg.
+
+**(a) A 2. ügyfél ugyanabba a projektbe kerül (közös DB + RLS):**
+- Nincs új infrastruktúra – csak egy új `mk_companies` sor + `mk_profiles` bejegyzés az első felhasználójának.
+- Feltétel: a fenti `company_id` + RLS + kereszt-teszt már készen és bizonyítottan jól működik (ez amúgy is előfeltétele mindkét útnak).
+- Kockázat: RLS/RPC-hiba esetén a szivárgás a közös DB-n belül elméletileg lehetséges – ezért a kereszt-teszt kötelező, mielőtt egy 2. valós ügyfél élő adatot kap.
+
+**(b) A 2. ügyfél saját, dedikált Supabase projektet kap:**
+- Új projekt létrehozása (Supabase Management API vagy kézzel a Dashboardon).
+- A séma + RLS + függvények (`db/supabase-setup.sql` és a `db/migrations/*.sql` teljes sora) lefuttatása az új projekten – ha ez a modell nyer, ezt automatizálni kell, mert 3+ projektnél a kézi futtatás már hibázásra ad esélyt.
+- Kell egy központi, kis "router"-tár (cég → projekt URL/kulcsok), amiből a kliens login előtt megtudja, melyik Supabase projekthez kell fordulnia.
+- Migrációk automatikus futtatása minden projekten: egy CI-pipeline, ami a router-tárból végigmegy az aktív cégek projektjein, projektenként naplózva a sikert/hibát, és **leáll**, ha bármelyiken hiba van (nem fut tovább vakon a többivel).
+
+### Mit kerüljünk el MOST, hogy ne zárjuk be magunkat egyik útba se
+1. Ne épüljön be sehova olyan feltételezés, hogy "csak egy Supabase projekt létezik örökre" – a `CONFIG.SUPABASE_URL`/kulcs-hivatkozást úgy alakítsuk ki, hogy később egy lookup-réteg elé kerülhessen anélkül, hogy az app többi része tudna róla.
+2. A service role kulcsot ne szórjuk több helyre – egy helyen (Netlify env var), dokumentáltan, hogy ha (b) felé mennénk, tudjuk, mit kell projektenként duplikálni.
+3. Az új-cég-létrehozó admin-logikát ne írjuk hardkódolt, egyetlen Supabase URL-t feltételező módon – legyen paraméterezhető, még ha most csak egy értéket kap is.
+4. Ne tervezzünk cégek közötti összesített lekérdezést/riportot ("az összes ügyfél összesített statisztikája") – ez architekturálisan csak közös DB-nél működne, és ha ilyen funkció felmerül, az implicit módon eldönti a kérdést. Ha kell, az explicit döntés legyen, ne egy mellékesen bevezetett funkció ereje.
+5. A `company_id`-t mindenhol denormalizáljuk, sose csak JOIN-nal levezetve – ez mindkét útnál helyes, egyiknél sem árt.
+6. A bejelentkezés-logikát úgy írjuk, hogy egy jövőbeli "melyik projekthez tartozol" lépés elé kerülhessen anélkül, hogy át kellene írni – most (egy projekt) ez nem kérdés, de a kód szerkezete ne zárja ki.
+
+### Szerepkörök
+| Szerepkör | Jogkör |
+|---|---|
+| **Rendszergazda** (`mk_platform_admins`) | Csak cég-kezelés: cégek listája, létrehozás, licenc. **Nincs** alapértelmezett rálátása egy cég napi adataira (élő nézet, dolgozók, riport) – ez természetesen kijön abból, hogy `mk_current_company()` egy tiszta rendszergazdánál `NULL`, ami sose egyezik egy valódi céggel. |
+| **Tulajdonos/admin** (`role='owner'`) | Minden a saját cégén belül, plusz a cég felhasználóinak kezelése és a licenc-állapot. |
+| **Irodai** (`role='office'`) | Ugyanaz, mint a tulajdonos, csak felhasználó-kezelés és licenc nélkül (törzsadat-szerkesztés, PIN-kiadás is belefér). |
+| **Helyszín-korlátozott** (`role='location'`, `location_id` kitöltve) | Csak néz (élő nézet, riport) a saját helyszínén – **nem szerkeszthet** (nem oszthat be, nem zárhat le műszakot). Első körben UI-szintű szűréssel, a teljes RLS-alapú kikényszerítés egy későbbi fázisban erősödik rá. |
+
+### Új ügyfél beállítása (rendszergazda-felület)
+Egy új, csak platform-adminnak látható nézet: cégnév, licenc-lejárat, első felhasználó (felhasználónév + jelszó), opcionális "példa adatok betöltése" kapcsoló (a mai BREMAT-mintájú csapatok/helyszínek/feladatok, amit az ügyfél átnevezhet – ha nincs bejelölve, a cég üresen indul). Technikai csavar: az `auth.users` létrehozása csak service role kulccsal lehetséges, ezért ez egy **új, író Netlify function** lesz (a meglévő `mk-attachment-url.ts` mintájára, de ez a hívó platform-admin jogosultságát is ellenőrzi, mielőtt bármit létrehoz).
+
+### Licenc
+- `mk_companies.license_expires_at` + `active` (kézi kapcsoló, a dátumtól függetlenül).
+- Lejáratkor **türelmi időszak**: az iroda be tud jelentkezni, mindent lát, de nem tud új eseményt/beosztást rögzíteni; a tablet egy "Lejárt előfizetés, keresse az irodát" képernyőt mutat. A kikényszerítés DB/RPC szinten történik (a security-definer RPC-k itt is kézzel ellenőrzik – ugyanaz az ok, mint a `company_id`-nál), a kliens csak UX-et ad hozzá (banner), nem ez a védelmi határ.
+
+### Bejelentkezés és MFA
+- **Login UX marad**: felhasználónév + kitalált domain (mai minta), kiegészítve cég-azonosítóval – amíg csak BREMAT létezik, a UX nem változik.
+- **Jelszó + TOTP** (Supabase Auth natív MFA, `auth.mfa.enroll/challenge/verify`), nincs hozzá extra szolgáltatás.
+- **"Megbízható eszközön 30 napig ne kérdezze újra"**: ez nem Supabase-natív – egy saját `mk_trusted_devices` (user_id + eszköz-token + lejárat) rekord, sikeres MFA után beállítva. UX-kényelem, nem biztonsági garancia: a jelszó ellopott tokennel is kell a belépéshez.
+- **E-mailes kód mint MFA-tartalék** (aki nem használ TOTP appot): ehhez **valós e-mail cím kell minden felhasználóhoz, külön mezőként** – ez bekerül az onboarding űrlapba (nem a bejelentkezési névtől függ, csak az MFA-tartalék e-mail kiküldés célja). Kell hozzá egy külső tranzakciós email-szolgáltatás (pl. Resend/Postmark – a Supabase beépített levélküldője csak tesztre elég, túl szűk rate-limittel).
+- **Elveszett telefon**: a cég tulajdonosa tud egy KOLLÉGÁJA MFA-faktorát törölni (saját magát ne tudja simán kikapcsolni). Ha az egyetlen owner veszíti el, a rendszergazda service role-lal tud törölni – jól naplózott, vészhelyzeti admin-funkció.
+- **Erős jelszó**: Supabase Auth Dashboard minimum-hossz beállítás (min. 12 karakterre emelve), plusz klienses komplexitás-ellenőrzés az űrlapon.
+- **Sikertelen belépések naplózása/korlátozása**: a login folyamat egy saját Netlify function (`/api/mk-login`) mögé kerül – a kliens nem hívja közvetlenül a Supabase-t, a function ellenőrzi egy `mk_login_failures` táblával (ugyanaz a minta, mint a tablet `mk_pin_failures`-nél) a sikertelen próbálkozások számát, mielőtt továbbadná a bejelentkezést.
+- **Tablet marad PIN-only, MFA nélkül** – tudatos döntés, nem hanyagság: a tablet megosztott, fizikailag felügyelt kioszk-eszköz, nem személyes bejelentkezés; a védelmi határ nem a PIN ereje, hanem a tablet linkjének titkossága (lásd alább) + a meglévő percenkénti brute-force limit. A biztonsági befektetést oda koncentráljuk, ahol a legnagyobb kárt lehet okozni (irodai admin-hozzáférés).
+
+### A tablet linkjének kockázata, ha kikerül
+- **Eszközhöz kötés + "Link csere" gomb együtt épül**: az első sikeres PIN-belépés után a tablet egy eszköz-tokent kap (`mk_terminal_devices`: terminal_id + token), a szerver csak ismert eszközről fogad el hívást. A Törzsadatok → Tabletek oldalon egy "Link csere" gomb új azonosítót/kulcsot generál a régi helyett (a tablet előzménye, eseménynaplója megmarad), a régi link azonnal érvénytelen.
+- Ma, PIN nélkül valaki csak a terminál nevét és a feladatlistát/helyszíneket látja (`mk_terminal_catalog`) – dolgozónevet, eseményt, beosztást nem. Ezt a katalógust érdemes még szűkebbre venni: a feladatlista csak sikeres PIN után jöjjön (a `mk_terminal_identify` válaszában).
+
+### Migráció: BREMAT mint első cég
+1. Staging Supabase projekten próbafuttatás először.
+2. Új, kizárólag a Munkakövetésnek fenntartott Supabase projekt (leválasztás a Valk logbooktól) – ez a migráció része, nem külön lépés.
+3. Migrációs SQL: `mk_companies` egy sorral (BREMAT), `company_id` minden táblán (nullable → backfill → `NOT NULL` + FK + index), `mk_profiles` a meglévő `@bremat.local` felhasználóknak `role='owner'`-rel, RLS-csere, RPC-k cseréje.
+4. Storage: a meglévő fájlok tényleges áthelyezése `<company_id>/` prefix alá – ez a Storage API `move()` hívásával megy (nem tiszta SQL-lel), egy egyszeri scriptben.
+5. **A BREMAT-felhasználók UX-a eddig a pontig nem változik** – a company-választó csak akkor jelenik meg, ha már 2+ cég van.
+
+### Kockázatok és kötelező tesztek/eljárások
+1. **Frankfurt régió** – a Supabase projekt EU (Frankfurt) régióban legyen, GDPR/adatrezidencia miatt.
+2. **Staging projekt** – minden RLS/séma-változás előbb ott, csak utána élesben.
+3. **Visszaállítás – kétféle értelemben:**
+   - Adat-visszaállítás: rendszeres, cégre szűrt logikai export a natív napi mentés mellett, kipróbálva (nem csak "van mentés", hanem tesztelve is, hogy vissza is lehet tölteni).
+   - **Egy elrontott feltöltésből/migrációból fél órán belül vissza kell tudni állni.** Ez két részből áll: a Netlify oldal egy kattintással visszaállítható egy korábbi deployra (natív funkció), a DB-oldali visszaállításhoz pedig minden migráció mellé kell egy dokumentált (ha lehet, scriptelt) visszaállítási lépéssor, staging-en előre kipróbálva – nem elég, hogy "elméletileg vissza lehetne állni".
+4. **Kereszt-teszt** – kötelező, automatizált, két próba-céggel, minden deploy előtt.
+5. **`service_role` átnézése** – minden hely, ahol használva van (ma: `mk-attachment-url.ts`; holnap: az új cég-létrehozó endpoint, a jövőbeli `/api/mk-login`), célzott biztonsági átvizsgálásra kerül minden változásnál.
+6. **Mentés** – a Supabase natív napi mentése mellett egy saját, cégre szűrt logikai export is fusson rendszeresen.
+7. **Incidens-terv** – dokumentált eljárás gyanús hozzáférés/szivárgás esetére: kit értesítünk, hogyan zárjuk le a hozzáférést, hogyan vizsgáljuk ki, hogyan tájékoztatjuk az érintett ügyfelet.
+8. **PWA** – a tablet-felület telepíthető Progressive Web App legyen, offline-toleranciával (a már előkészített `p_event_time` paraméterrel összekötve).
+9. **Erős jelszó + kétlépcsős azonosítás** – lásd „Bejelentkezés és MFA” fent.
+
 ## Állapot (2026. szeptember 11.)
 - Az MVP élesben fut: Netlify (`bremat.netlify.app`) + saját Supabase projekt (`nuufcwpbjfimykumufgi`). A `CONFIG`-ban be van írva a Supabase URL és a publishable key.
 - Deploy: az `Allexxht/astro-platform-starter` repo, az app a `public/munkakovetes/` alatt.
@@ -61,14 +149,15 @@ A bevezetés ütemekben halad. Most az MVP kész, és az ötletek menet közben 
   - **Riportok fül, Excel exporttal.** Új „Riportok” fül az irodai fejlécben: időszakválasztó (Ma / Tegnap / Ez a hét / Előző hét / Ez a hónap / Előző hónap / Egyedi) és szűrők (csapat, helyszín, dolgozó), négy alfül – Jelenlét, Feladatonként, Terv és tény, Rendelésszám szerint. Nincs hozzá DB-változás: minden az `mk_events`/`mk_assignments` lekéréséből és a `summarize()`-ból számolódik, ugyanúgy, mint az élő nézetben. „Excel letöltés”: egy .xlsx, riportonként külön munkalappal (órák két tizedessel, magyar dátumformátum, a fájlnévben az időszak). Nyomtatáshoz fekvő A4-es print stílus. Demó módban több hetes mintaadat van hozzá.
 - Még nincs kipróbálva éles Supabase ellen: a Realtime frissítés, a törlés/archiválás végigkattintása, a rajz-funkció (a `002_attachments.sql` migráció futtatása + a `MK_SUPABASE_SERVICE_ROLE_KEY` Netlify env var beállítása szükséges hozzá), és a Riportok Excel exportja (a SheetJS CDN-betöltését ellenőrizni kell éles, korlátozás nélküli hálózaton).
 - Nyitott kérdések: mely ötletek nem tetszettek; a valódi törzsadatok (dolgozók, csapatok, csarnokok, feladatok); a tabletek száma; **az Elakadtam funkciót (a jelenlegi elakadás-jelzés workflow-ját) a próbahét után újragondoljuk** – egyelőre változatlan marad.
+- **2026. szeptember 15.: a többbérlős SaaS irány és a részletes terv lezárva** (lásd „Többbérlős SaaS – terv” szakasz). Ehhez a ponthoz még nem készült kód – ez a következő fejlesztési kör alapja. A cégek fizikai szétválasztásának kérdése (közös DB+RLS vs. cégenkénti Supabase projekt) tudatosan elhalasztva a 2. valós ügyfél megjelenéséig; addig az adatmodell mindkét úthoz felkészítve épül (`company_id` + RLS mindenhol, kötelező kereszt-teszt).
 
 ## Ütemterv
-- **2. kör:**
+- **Következő nagy lépés: a többbérlős átállás** – lásd „Többbérlős SaaS – terv” szakasz, ott van fázisokra bontva (adatmodell+RLS → bejelentkezés/szerepkör-UI → rendszergazda-felület → licenc → helyszín-szerep finomítása). Ez felülírja/pontosítja az alábbi listát ott, ahol átfedés van (pl. a "szerepkörök" már nem különálló 3. körös ötlet, hanem a többbérlős terv része).
+- **2. kör** (a jelenlegi, egycéges funkciók közül):
   - offline mód (a `p_event_time` paraméter már elő van készítve)
 - **3. kör:**
   - megrendeléshez kötés és utókalkuláció
   - NFC kártya (a PIN képernyő már fogad billentyűzetes bevitelt, így az USB-s NFC olvasó is működni fog)
-  - szerepkörök
 
 ## Munkamódszer
 - A magyarázatok magyarul szóljanak, de a menü- és beállításneveket angolul írd, mert az eszközök angol nyelvű felületet használnak.
