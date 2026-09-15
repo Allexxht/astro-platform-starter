@@ -60,13 +60,38 @@ Ez a szakasz a megbeszélt, eldöntött irányt írja le a BREMAT-specifikus bel
 ### Cégazonosítás az adatmodellben – ez épül MOST, a fizikai szétválasztás kérdésétől függetlenül
 Minden `mk_` táblához egy `company_id` oszlop kerül (denormalizáltan, még ott is, ahol JOIN-nal levezethető lenne – egyszerűbb és gyorsabb RLS-t/indexet ad). Ehhez tartozik:
 - `mk_companies` (cég neve, licenc-lejárat, `active` kézi kapcsoló, a dátumtól függetlenül).
-- `mk_profiles` (`user_id` → `auth.users.id`, `company_id`, `role`: `owner`/`office`/`location`, `location_id` csak `location` szerepkörnél).
+- `mk_profiles` (`user_id` → `auth.users.id`, `company_id`, `role`: `owner`/`office` az induló verzióban – a `location_id` oszlop és a `location` szerepkör-érték fenntartva a jövőnek, de nem aktív, lásd „Szerepkörök”).
 - `mk_platform_admins` (`user_id`) – **külön** tábla, szándékosan nem a `mk_profiles`-ban, hogy a rendszergazda-jog sose keveredjen a céges szerepkör-logikával.
 - RLS minden táblán: `company_id = mk_current_company()` (egy `security definer stable` segédfüggvény, ami a hívó `auth.uid()`-jéhez tartozó `mk_profiles` sorból olvas). A `company_id`-t sose fogadjuk el a klienstől – egy `before insert` trigger mindig felülírja, a `with check` csak védőháló.
+- **Ki írhatja az `mk_profiles` és `mk_companies` táblákat – ez a legkritikusabb pont, mert enélkül bárki átléptetheti magát másik céghez:**
+  - `mk_profiles` INSERT: kliensoldalról soha. Minden felhasználó (az első owner és minden későbbi kolléga is) `auth.users` létrehozásán megy át, ami csak service role-lal lehetséges – tehát mindig a rendszergazda-felület, illetve egy jövőbeli "kolléga meghívása" szerveroldali (service role) végpontján keresztül jön létre, nem közvetlen kliens-INSERT-tel.
+  - `mk_profiles` UPDATE: csak `role='owner'`, csak a saját cégén belül (`company_id = mk_current_company()` mindkét oldalon – a `using` és a `with check` is ugyanezt a kifejezést nézi, így a `company_id` gyakorlatilag módosíthatatlan ezen a policyn keresztül), és **kifejezetten kizárva a saját sora** (`user_id <> auth.uid()`) – egy owner nem tudja saját magát átminősíteni vagy más céghez áthelyezni. Extra védelem, ami RLS-hibától függetlenül is véd: oszlop-szintű `GRANT`/`REVOKE` úgy állítva, hogy `company_id`-t és `user_id`-t még owner se tudja szerepeltetni egy UPDATE-ben.
+  - `mk_profiles` DELETE: csak `role='owner'`, csak a saját cégén belül, saját sora nélkül (kollégát lehet törölni/hozzáférést megszüntetni, saját magát nem).
+  - `mk_companies` SELECT: mindenki csak a saját `company_id`-jű sorát látja.
+  - `mk_companies` UPDATE: **a `license_expires_at` és az `active` oszlopot `authenticated` szerepkör egyáltalán nem tudja írni** – ez is oszlop-szintű `GRANT`/`REVOKE`, nem csak RLS-feltétel, tehát ezt kizárólag `service_role` (a rendszergazda-felület szerveroldali végpontja) módosíthatja, egy owner semmilyen módon nem. A `name` oszlopot egy owner írhatja a saját cégén.
+  - `mk_companies` INSERT/DELETE: kliensoldalról soha – új cég létrehozása és megszüntetése is a rendszergazda-felület szerveroldali (service role) végpontján megy.
 - **A tablet `security definer` RPC-i (`mk_terminal_*`, `mk_archive_*`, `mk_set_pin`) megkerülik az RLS-t** – ezekben KÉZZEL, minden lekérdezésben kell a `company_id` szűrés, ez a legkritikusabb kockázati pont. Ide **kettős védelem** kerül: a lekérdezés eleve szűrt, *és* a visszaadás előtt egy explicit ellenőrzés (ha mégis más cég sora jönne vissza, dobjon hibát).
 - **PIN-egyediség céges hatókörre vált** – ma globálisan egyedi (4 jegyű PIN, 10 000 lehetőség, egyetlen cégnél nem ütközik, de több cégnél garantáltan lesz kollízió). A `mk_pins` és a PIN-keresés/egyediség-ellenőrzés cégen belülire szűkül.
 - **Storage:** a `mk-rajzok` bucket tárolási útvonala `<company_id>/<uuid>/<fájlnév>` sémára vált, a storage policy a mappa első szegmensét hasonlítja `mk_current_company()`-hoz.
-- **Kötelező, automatizált kereszt-teszt**: két próba-cég, minden deploy előtt lefutó teszt, ami megpróbálja az egyikkel "meglátni" a másikat minden felületen és minden RPC-n. Ez nem opció, ez kapu – RLS/RPC-változás nem mehet éles ágba, amíg ez nem zöld.
+
+### Kereszt-teszt: valódi kapu, nem emlékezet
+A kereszt-teszt nem "emlékeztető", hanem egy **GitHub Actions workflow**, ami minden pull requesten automatikusan lefut, és ha elbukik, a **branch protection** miatt a mergelés gombja le van tiltva – nincs "elfelejtettem" eshetőség.
+
+**Hogyan fut a teszt:**
+- A Supabase CLI helyi (Docker-alapú) dev stack-je (`supabase start`) indul el a CI futtatóban – ez egy önálló, eldobható Postgres+Auth+PostgREST+Storage környezet, nem az élő vagy a staging projekt.
+- A migrációk (`db/migrations/*.sql`) lefutnak ellene (`supabase db reset`).
+- Egy teszt-script két próba-céget és felhasználót hoz létre, majd A cég bejelentkezett session-jével megpróbál hozzáférni B cég adataihoz – minden érintett táblán (select/insert/update) ÉS minden `mk_terminal_*`/`mk_archive_*` RPC-n (más cég terminal_id/task_id/attachment_id-jével hívva). Minden próbálkozásnak el kell buknia (üres eredmény vagy hiba) – ha bármelyik átmegy, a teszt bukik.
+- A workflow PR-on és `main`-re irányuló push előtt is lefut.
+
+**Branch protection beállítása a GitHubon (ezt egyszer kell beállítani, kézzel, a repó Settings menüjében):**
+1. GitHub repo → **Settings → Branches** → **Add branch protection rule**.
+2. Branch name pattern: `main`.
+3. Bekapcsolva: **Require a pull request before merging** – ettől kezdve a `main`-re közvetlen push le lesz tiltva, csak PR-on keresztül lehet mergelni.
+4. Bekapcsolva: **Require status checks to pass before merging**, és a listából kiválasztva a kereszt-teszt workflow neve (csak azután jelenik meg a listában, hogy a workflow már lefutott legalább egyszer).
+5. Bekapcsolva: **Require branches to be up to date before merging** – így a teszt mindig a legfrissebb `main` ellen fut.
+6. **Fontos:** a **"Do not allow bypassing the above settings"** opció is bekapcsolva – ez a szabályt az adminra is érvényessé teszi, különben egy piros teszt mellett is lehetne "force merge"-elni, és pont ez ellen kell védekezni.
+
+**Miért ez, és nem más:** egy lokális git pre-push hook gyengébb védelem, mert megkerülhető (`--no-verify`), vagy egyszerűen nincs telepítve egy friss klónon – jó gyors, helyi visszajelzésre, de nem helyettesíti a GitHub-oldali kaput. A GitHub Actions + branch protection az, ami tényleg **megállítja a feltöltést**, nem csak figyelmeztet.
 
 ### Két lehetséges út a cégek fizikai szétválasztására – a döntés elhalasztva a 2. ügyfélig
 Az első ügyfél (BREMAT) saját, a Valk logbooktól leválasztott Supabase projektben van egyedül – **jelenleg nincs is különbség a két út között**, mert egy projektben egy cég van. A döntést a 2. ügyfél tényleges megjelenésekor hozzuk meg.
@@ -91,12 +116,18 @@ Az első ügyfél (BREMAT) saját, a Valk logbooktól leválasztott Supabase pro
 6. A bejelentkezés-logikát úgy írjuk, hogy egy jövőbeli "melyik projekthez tartozol" lépés elé kerülhessen anélkül, hogy át kellene írni – most (egy projekt) ez nem kérdés, de a kód szerkezete ne zárja ki.
 
 ### Szerepkörök
+Az induló verzió **csak két céges szerepkört tartalmaz** – a helyszín-korlátozott szerepkör kimarad az első körből (lásd alul, miért).
+
 | Szerepkör | Jogkör |
 |---|---|
 | **Rendszergazda** (`mk_platform_admins`) | Csak cég-kezelés: cégek listája, létrehozás, licenc. **Nincs** alapértelmezett rálátása egy cég napi adataira (élő nézet, dolgozók, riport) – ez természetesen kijön abból, hogy `mk_current_company()` egy tiszta rendszergazdánál `NULL`, ami sose egyezik egy valódi céggel. |
-| **Tulajdonos/admin** (`role='owner'`) | Minden a saját cégén belül, plusz a cég felhasználóinak kezelése és a licenc-állapot. |
+| **Tulajdonos/admin** (`role='owner'`) | Minden a saját cégén belül, plusz a cég felhasználóinak kezelése (lásd fentebb az `mk_profiles` írási jogokat) és a licenc-állapot **megtekintése** (az írása nem – lásd fentebb, csak platform admin). |
 | **Irodai** (`role='office'`) | Ugyanaz, mint a tulajdonos, csak felhasználó-kezelés és licenc nélkül (törzsadat-szerkesztés, PIN-kiadás is belefér). |
-| **Helyszín-korlátozott** (`role='location'`, `location_id` kitöltve) | Csak néz (élő nézet, riport) a saját helyszínén – **nem szerkeszthet** (nem oszthat be, nem zárhat le műszakot). Első körben UI-szintű szűréssel, a teljes RLS-alapú kikényszerítés egy későbbi fázisban erősödik rá. |
+
+**Helyszín-korlátozott szerepkör – kimarad az első körből.** A döntés: vagy teljes RLS-kikényszerítéssel épül, vagy egyelőre nincs ilyen szerepkör – UI-szintű szűrés (ahol a szerver mindent visszaadna, csak a felület rejtené el a többit) nem elég, mert egy közvetlen API-hívás megkerülné. Amit a teljes RLS-hez tudni kell, mielőtt ez megépül:
+- A `mk_events`/`mk_assignments` táblákra is kellene egy denormalizált `location_id` oszlop (a `company_id` mintájára, a hozzá tartozó feladat/tablet helyszínéből beírva íráskor) – ezzel az RLS gyors és egyszerű (`location_id = mk_current_location()`), nem kell drága JOIN-t futtatni minden sornál. A `mk_tasks`/`mk_terminals` táblákon már ma is van `location_id`, azokra a szűrés emiatt triviális lenne.
+- **A nyitott, még megoldatlan rész: a `mk_employees` táblának nincs helyszíne** (a dolgozó a csapatához van kötve, nem egy helyszínhez). Egy helyszín-korlátozott felhasználó számára nem egyértelmű, mely dolgozókat "lássa" a törzsadatok között, hiszen valaki több helyszínen is dolgozhat különböző napokon – ez nem egy statikus oszlop, hanem egy levezetett kérdés ("ki kapott már beosztást ezen a helyszínen"). Ezt tisztázni kell, mielőtt a szerepkör megépül.
+- Amíg ez a két pont nincs végiggondolva és megépítve, ez a szerepkör nem kerül be a termékbe – se UI-szintű, se félkész RLS-változatban.
 
 ### Új ügyfél beállítása (rendszergazda-felület)
 Egy új, csak platform-adminnak látható nézet: cégnév, licenc-lejárat, első felhasználó (felhasználónév + jelszó), opcionális "példa adatok betöltése" kapcsoló (a mai BREMAT-mintájú csapatok/helyszínek/feladatok, amit az ügyfél átnevezhet – ha nincs bejelölve, a cég üresen indul). Technikai csavar: az `auth.users` létrehozása csak service role kulccsal lehetséges, ezért ez egy **új, író Netlify function** lesz (a meglévő `mk-attachment-url.ts` mintájára, de ez a hívó platform-admin jogosultságát is ellenőrzi, mielőtt bármit létrehoz).
@@ -112,12 +143,40 @@ Egy új, csak platform-adminnak látható nézet: cégnév, licenc-lejárat, els
 - **E-mailes kód mint MFA-tartalék** (aki nem használ TOTP appot): ehhez **valós e-mail cím kell minden felhasználóhoz, külön mezőként** – ez bekerül az onboarding űrlapba (nem a bejelentkezési névtől függ, csak az MFA-tartalék e-mail kiküldés célja). Kell hozzá egy külső tranzakciós email-szolgáltatás (pl. Resend/Postmark – a Supabase beépített levélküldője csak tesztre elég, túl szűk rate-limittel).
 - **Elveszett telefon**: a cég tulajdonosa tud egy KOLLÉGÁJA MFA-faktorát törölni (saját magát ne tudja simán kikapcsolni). Ha az egyetlen owner veszíti el, a rendszergazda service role-lal tud törölni – jól naplózott, vészhelyzeti admin-funkció.
 - **Erős jelszó**: Supabase Auth Dashboard minimum-hossz beállítás (min. 12 karakterre emelve), plusz klienses komplexitás-ellenőrzés az űrlapon.
-- **Sikertelen belépések naplózása/korlátozása**: a login folyamat egy saját Netlify function (`/api/mk-login`) mögé kerül – a kliens nem hívja közvetlenül a Supabase-t, a function ellenőrzi egy `mk_login_failures` táblával (ugyanaz a minta, mint a tablet `mk_pin_failures`-nél) a sikertelen próbálkozások számát, mielőtt továbbadná a bejelentkezést.
+- **Sikertelen belépések naplózása/korlátozása** – itt van egy valódi kompromisszum, amit érdemes tudni:
+  - A **saját `/api/mk-login` Netlify function** (a kliens nem hívja közvetlenül a Supabase-t, a function egy `mk_login_failures` táblával, a tablet `mk_pin_failures`-mintáján, felhasználóra szabottan korlátozza a próbálkozásokat) ad valódi, célzott fiókzárolást és naplózást. **Hátránya**: ez egy új, egyetlen pontban összefutó függőség lesz a bejelentkezésben – ha ez a function bármiért nem elérhető (kódhiba, Netlify-kiesés, timeout), **senki nem tud bejelentkezni**, miközben korábban a kliens közvetlenül a Supabase saját, jobban tesztelt, magas rendelkezésre állású Auth API-ját hívta. Ez a hátrány nem elméleti, hanem az architektúra egy valódi új törésponja.
+  - **Alternatívák, amik nem vezetnek be ilyen töréspontot:**
+    - **Supabase natív rate limitje** az Auth API-n – IP/globális szintű túlterhelés-védelem, kódolás nélkül működik, de nem ad felhasználóra szabott zárolást.
+    - **Captcha** (pl. Cloudflare Turnstile) a login űrlapon – kliens-oldali widget, nincs saját szerver, jelentősen csökkenti az automatizált brute-force kockázatot.
+    - **Kliens-oldali fékezés** (egyre hosszabb várakozás a gomb újbóli engedélyezése előtt) – gyenge, megkerülhető védelem, de nulla új infrastruktúra/kockázat.
+  - **Ajánlott kiindulás: Supabase natív rate limit + Captcha.** A saját `/api/mk-login` végpontot csak akkor vezessük be, ha ez bizonyítottan nem elég – konkrétan, ha a hozzáférési logban (lásd lent) célzott, ismétlődő próbálkozást látunk egy adott ügyfél fiókjai ellen, vagy egy ügyfél szerződésben/megfelelőségi okból kifejezetten megköveteli a felhasználóra szabott zárolást.
 - **Tablet marad PIN-only, MFA nélkül** – tudatos döntés, nem hanyagság: a tablet megosztott, fizikailag felügyelt kioszk-eszköz, nem személyes bejelentkezés; a védelmi határ nem a PIN ereje, hanem a tablet linkjének titkossága (lásd alább) + a meglévő percenkénti brute-force limit. A biztonsági befektetést oda koncentráljuk, ahol a legnagyobb kárt lehet okozni (irodai admin-hozzáférés).
 
 ### A tablet linkjének kockázata, ha kikerül
 - **Eszközhöz kötés + "Link csere" gomb együtt épül**: az első sikeres PIN-belépés után a tablet egy eszköz-tokent kap (`mk_terminal_devices`: terminal_id + token), a szerver csak ismert eszközről fogad el hívást. A Törzsadatok → Tabletek oldalon egy "Link csere" gomb új azonosítót/kulcsot generál a régi helyett (a tablet előzménye, eseménynaplója megmarad), a régi link azonnal érvénytelen.
 - Ma, PIN nélkül valaki csak a terminál nevét és a feladatlistát/helyszíneket látja (`mk_terminal_catalog`) – dolgozónevet, eseményt, beosztást nem. Ezt a katalógust érdemes még szűkebbre venni: a feladatlista csak sikeres PIN után jöjjön (a `mk_terminal_identify` válaszában).
+
+### Hozzáférési napló
+Egy `mk_access_log` tábla rögzíti, ki mikor melyik cég adatához fért hozzá – ez nem helyettesíti az RLS-t (ami magát a hozzáférést engedi/tiltja), hanem az utólagos kivizsgáláshoz kell.
+
+**Mit naplózunk** (a lényeg, nem minden kattintás):
+- **Bejelentkezés** – sikeres és sikertelen is (a sikertelen próbálkozások mintázata pont egy incidens korai jele lehet), ki, mikor, honnan (IP).
+- **Riport-lekérés** – ki, melyik cég, melyik riport-fül, milyen időszak.
+- **Csatolmány megnyitás** – ki (irodai felhasználó, vagy tablet+terminál+dolgozó), melyik csatolmány, melyik cég.
+- **Cég-létrehozás** – melyik rendszergazda, milyen cégnév, mikor.
+
+**Hogyan kerül be a log:** a bejelentkezés és a csatolmány-megnyitás már ma is egy szerveroldali RPC-n/végponton megy át (`mk_terminal_attachment_path`, a jövőbeli login-végpont vagy a natív Supabase Auth) – ott a naplózás a függvény/endpoint része, nem a kliensre van bízva. A riport-lekérés ma közvetlen, RLS-védett táblalekérdezés a kliensből – ide egy kliensoldali naplózó hívás kerül a sikeres lekérdezés után (ez nem biztonsági határ, csak láthatóság: magát az adatot már az RLS megvédte, a log csak azt rögzíti utólagos átláthatóság kedvéért, hogy ki nézte meg).
+
+**Fontos korlát, amit tudni kell:** egy RLS által kiszűrt SELECT (amikor valaki más cég adatára próbál rákérdezni) a Postgres/PostgREST szintjén egyszerűen **üres eredményt** ad, nem hibát – ezt a kliens nem tudja megbízhatóan "elutasítva" eseményként naplózni, mert nem különbözik egy valóban üres eredménytől. A biztonsági védelmet itt is a kereszt-teszt adja (lásd fentebb), nem a napló – a napló a *sikeres, jogos* hozzáférésekről ad képet, plusz a security-definer RPC-k (tablet) által *explicit elutasított* próbálkozásokról (azok hibát dobnak, azt lehet és kell naplózni).
+
+**Megőrzés:** 24 hónap, utána egy időzített feladat törli a régebbi sorokat. Egy cég végleges törlésekor (lásd alább) a hozzá tartozó log-bejegyzések nem törlődnek azonnal a többivel együtt, hanem **anonimizálódnak** (a company_id/user_id hivatkozás egy "törölt cég" jelzésre változik, a tartalmi részletek eltávolítva) – így a platform saját auditálhatósága megmarad anélkül, hogy az ügyfél tényleges adatát tovább tartanánk.
+
+**Incidens kivizsgálásnál:** a `mk_access_log`-ot company_id/user_id és időintervallum szerint szűrve nézzük át, összevetve a gyanú tárgyával (pl. "ez a felhasználó mikor és honnan jelentkezett be", "ki nyitotta meg ezt a csatolmányt") – ez az elsődleges eszköz ahhoz, hogy egy gyanús eset esetén rekonstruáljuk, mi történt.
+
+### Adatmegőrzés és törlés a szerződés végén
+- **Szerződés megszűnése után egy türelmi időszak (javaslat: 30 nap)**, amíg az adat megmarad, de a licenc-lejárathoz hasonló "csak olvasható" állapotban (lásd Licenc) – ha téves volt a lemondás, ez alatt még visszakapcsolható.
+- **Export (GDPR adathordozhatóság):** az ügyfél kérésére egy "Teljes export" a Riportok Excel-exportján felül a törzsadatokat (dolgozók, feladatok, helyszínek, csapatok, tabletek) és a csatolt rajzokat is tartalmazza (egy ZIP-be csomagolva, a fájlokkal együtt) – ez a mai Riport-export bővítése, még nincs megépítve.
+- **Végleges törlés** a türelmi időszak lejártával, dokumentált, ellenőrzött lépéssorban (nem kézi, sorról-sorra törlés): `DELETE ... WHERE company_id = X` minden `mk_` táblán a megfelelő sorrendben (vagy CASCADE-del), a `<company_id>/` prefixű Storage-objektumok törlése a Storage API-val (nem SQL-lel megy, lásd Migráció), és a céghez tartozó `auth.users` sorok törlése az Admin API-val. A `mk_access_log` bejegyzései nem törlődnek, csak anonimizálódnak (lásd Hozzáférési napló).
 
 ### Migráció: BREMAT mint első cég
 1. Staging Supabase projekten próbafuttatás először.
@@ -132,8 +191,8 @@ Egy új, csak platform-adminnak látható nézet: cégnév, licenc-lejárat, els
 3. **Visszaállítás – kétféle értelemben:**
    - Adat-visszaállítás: rendszeres, cégre szűrt logikai export a natív napi mentés mellett, kipróbálva (nem csak "van mentés", hanem tesztelve is, hogy vissza is lehet tölteni).
    - **Egy elrontott feltöltésből/migrációból fél órán belül vissza kell tudni állni.** Ez két részből áll: a Netlify oldal egy kattintással visszaállítható egy korábbi deployra (natív funkció), a DB-oldali visszaállításhoz pedig minden migráció mellé kell egy dokumentált (ha lehet, scriptelt) visszaállítási lépéssor, staging-en előre kipróbálva – nem elég, hogy "elméletileg vissza lehetne állni".
-4. **Kereszt-teszt** – kötelező, automatizált, két próba-céggel, minden deploy előtt.
-5. **`service_role` átnézése** – minden hely, ahol használva van (ma: `mk-attachment-url.ts`; holnap: az új cég-létrehozó endpoint, a jövőbeli `/api/mk-login`), célzott biztonsági átvizsgálásra kerül minden változásnál.
+4. **Kereszt-teszt** – kötelező, automatizált, két próba-céggel, minden deploy előtt. Lásd „Kereszt-teszt: valódi kapu, nem emlékezet” szakasz a GitHub Actions + branch protection pontos beállításáért.
+5. **`service_role` átnézése** – minden hely, ahol használva van (ma: `mk-attachment-url.ts`; holnap: az új cég-létrehozó endpoint, és csak ha tényleg bevezetjük, a `/api/mk-login` – lásd „Bejelentkezés és MFA”, ahol ez nem alapértelmezett terv, csak feltételes), célzott biztonsági átvizsgálásra kerül minden változásnál.
 6. **Mentés** – a Supabase natív napi mentése mellett egy saját, cégre szűrt logikai export is fusson rendszeresen.
 7. **Incidens-terv** – dokumentált eljárás gyanús hozzáférés/szivárgás esetére: kit értesítünk, hogyan zárjuk le a hozzáférést, hogyan vizsgáljuk ki, hogyan tájékoztatjuk az érintett ügyfelet.
 8. **PWA** – a tablet-felület telepíthető Progressive Web App legyen, offline-toleranciával (a már előkészített `p_event_time` paraméterrel összekötve).
@@ -152,7 +211,7 @@ Egy új, csak platform-adminnak látható nézet: cégnév, licenc-lejárat, els
 - **2026. szeptember 15.: a többbérlős SaaS irány és a részletes terv lezárva** (lásd „Többbérlős SaaS – terv” szakasz). Ehhez a ponthoz még nem készült kód – ez a következő fejlesztési kör alapja. A cégek fizikai szétválasztásának kérdése (közös DB+RLS vs. cégenkénti Supabase projekt) tudatosan elhalasztva a 2. valós ügyfél megjelenéséig; addig az adatmodell mindkét úthoz felkészítve épül (`company_id` + RLS mindenhol, kötelező kereszt-teszt).
 
 ## Ütemterv
-- **Következő nagy lépés: a többbérlős átállás** – lásd „Többbérlős SaaS – terv” szakasz, ott van fázisokra bontva (adatmodell+RLS → bejelentkezés/szerepkör-UI → rendszergazda-felület → licenc → helyszín-szerep finomítása). Ez felülírja/pontosítja az alábbi listát ott, ahol átfedés van (pl. a "szerepkörök" már nem különálló 3. körös ötlet, hanem a többbérlős terv része).
+- **Következő nagy lépés: a többbérlős átállás** – lásd „Többbérlős SaaS – terv” szakasz, ott van fázisokra bontva (adatmodell+RLS+kereszt-teszt → bejelentkezés/szerepkör-UI → rendszergazda-felület → licenc). A helyszín-korlátozott szerepkör tudatosan NEM része ennek a körnek (lásd „Szerepkörök” a tervben, miért). Ez felülírja/pontosítja az alábbi listát ott, ahol átfedés van (pl. a "szerepkörök" már nem különálló 3. körös ötlet, hanem a többbérlős terv része).
 - **2. kör** (a jelenlegi, egycéges funkciók közül):
   - offline mód (a `p_event_time` paraméter már elő van készítve)
 - **3. kör:**
