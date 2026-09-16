@@ -7,11 +7,16 @@ name: Kereszt-teszt (cross-tenant isolation)
 # CLI dev stack ellen (Docker-alapú Postgres+Auth+PostgREST+Storage, NEM az éles
 # vagy a staging projekt).
 #
-# FONTOS: amíg a többbérlős adatmodell (mk_companies, mk_profiles, company_id,
-# RLS) nincs megépítve, ez a job SZÁNDÉKOSAN pirosra fut – a run.mjs explicit
-# hibával áll le, nem ad hamis zöldet. Ez a branch protection-nel együtt (lásd
-# CLAUDE.md) azt jelenti, hogy amíg a következő kör (adatmodell + RLS) el nem
-# készül, a main-be semmi nem mergelhető ezen a workflow-n keresztül. Ez szándékos.
+# FONTOS – bootstrap vs. szigorú mód: amíg a többbérlős adatmodell (mk_companies
+# tábla) nincs megépítve, ez a job ZÖLDEN fut le, egy jól látható üzenettel, hogy
+# jelenleg nincs mit vizsgálnia (lásd run.mjs). Attól kezdve, hogy a mk_companies
+# tábla megjelenik a sémában, a teszt szigorúvá válik: az adatbázisban keres meg
+# minden company_id-s táblát/RPC-t, és bukik, ha bármelyik hiányzik a
+# tests/cross-tenant/manifest.mjs-ből, vagy ha bármelyik kereszt-bérlős próba
+# átmenne. Ez a branch protection-nel együtt (lásd CLAUDE.md) azt jelenti: a
+# main-be a jelenlegi (egycéges) kód még mergelhető ezen a workflow-n keresztül,
+# de a következő kör (adatmodell + RLS) csak akkor mergelhető, ha a manifest a
+# sémával együtt, teljesen bővül, és a kereszt-bérlős próba valóban átmegy.
 
 on:
   pull_request:

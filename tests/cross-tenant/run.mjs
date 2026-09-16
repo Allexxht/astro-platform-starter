@@ -6,29 +6,39 @@
 // egy eldobható, helyi Supabase CLI dev stack ellen (`supabase start`), miután a séma
 // (db/supabase-setup.sql + db/migrations/*.sql) alkalmazva lett rá.
 //
-// A cél: A cég bejelentkezett session-jével megpróbálni hozzáférni B cég adataihoz –
-// minden, a manifest.mjs-ben regisztrált táblán és RPC-n. Minden próbálkozásnak
-// hibával vagy üres eredménnyel kell végződnie; ha bármelyik átmegy, a teszt bukik.
+// Két üzemmód van, hogy a check ne zárja be a repót azelőtt, hogy a többbérlős
+// adatmodell egyáltalán létezne:
 //
-// AMÍG NINCS TÖBBBÉRLŐS ADATMODELL: ennek a scriptnek szándékosan, hangosan el kell
-// buknia (exit 1, olvasható üzenettel) – nem ad hamis zöldet. Ez nem hiba, ez a terv
-// része: a branch protection csak akkor engedi a mergelést, ha ez a check zöld, és
-// zöld csak akkor lehet, ha a többbérlős séma + a manifest bővítése valóban megtörtént.
+//   1) BOOTSTRAP (public.mk_companies tábla NEM létezik): a teszt ZÖLDEN fut le,
+//      jól látható üzenettel, hogy jelenleg nincs többbérlős séma, ezért semmit
+//      nem vizsgált. Ez a mai állapot.
+//
+//   2) SZIGORÚ (public.mk_companies LÉTEZIK): innentől a teszt már nem "kegyelmi
+//      időszak". Végigmegy az adatbázison, és megkeres minden company_id oszlopos
+//      táblát és minden company_id-t használó security definer függvényt – ha
+//      bármelyik hiányzik a tests/cross-tenant/manifest.mjs-ből, BUKÁS (a manifest
+//      teljességét a séma dönti el, nem az emlékezetünk). Ha a manifest üres,
+//      BUKÁS. Utána két próba-céget/felhasználót hoz létre, és A cég session-jével
+//      megpróbál hozzáférni B cég adataihoz minden regisztrált táblán/RPC-n – ha
+//      bármelyik átmegy, BUKÁS.
 
 import { execFileSync } from 'node:child_process';
 import { TENANT_TABLES, TENANT_RPCS } from './manifest.mjs';
 
 function fail(message) {
   console.error('\n============================================================');
-  console.error('KERESZT-TESZT: BUKÁS (ez a jelenlegi állapotban lehet szándékos)');
+  console.error('KERESZT-TESZT: BUKÁS');
   console.error('============================================================\n');
   console.error(message);
-  console.error(
-    '\nHa ez a következő adatmodell-PR előtt fut: ez a bukás VÁRT, amíg a többbérlős\n' +
-      'séma (mk_companies, mk_profiles, company_id, RLS) nincs megépítve. Lásd\n' +
-      'CLAUDE.md "Kereszt-teszt: valódi kapu, nem emlékezet".\n'
-  );
   process.exit(1);
+}
+
+function pass(message) {
+  console.log('\n============================================================');
+  console.log('KERESZT-TESZT: OK');
+  console.log('============================================================\n');
+  console.log(message);
+  process.exit(0);
 }
 
 const DB_URL = process.env.DB_URL || process.env.SUPABASE_DB_URL;
@@ -47,6 +57,11 @@ function psql(sql) {
   return execFileSync('psql', [DB_URL, '-t', '-A', '-c', sql], { encoding: 'utf8' }).trim();
 }
 
+function psqlRows(sql) {
+  const out = psql(sql);
+  return out === '' ? [] : out.split('\n');
+}
+
 // --- 1. alapfeltétel: létezik-e a többbérlős séma gerince (mk_companies) ---
 let hasCompanies;
 try {
@@ -56,17 +71,32 @@ try {
 }
 
 if (hasCompanies !== 't') {
-  fail(
-    'A public.mk_companies tábla nem létezik ebben a sémában.\n\n' +
-      'A többbérlős adatmodell (mk_companies, mk_profiles, mk_platform_admins,\n' +
-      'company_id oszlopok, RLS, mk_current_company()) még nincs megépítve\n' +
-      '(lásd CLAUDE.md "Cégazonosítás az adatmodellben") – ezért a kereszt-tesztnek\n' +
-      'jelenleg nincs mit tesztelnie. Ez a workflow addig marad piros, amíg a\n' +
-      'következő fejlesztési kör (adatmodell + RLS) meg nem épül.'
+  pass(
+    'A public.mk_companies tábla nem létezik ebben a sémában – jelenleg nincs\n' +
+      'többbérlős adatmodell (lásd CLAUDE.md "Cégazonosítás az adatmodellben"),\n' +
+      'ezért ez a teszt NEM VIZSGÁLT SEMMIT. Ez a bootstrap állapot: ez a check\n' +
+      'attól kezdve válik szigorúvá (és attól kezdve tud ténylegesen szivárgást\n' +
+      'kiszűrni), hogy a public.mk_companies tábla megjelenik a sémában.'
   );
 }
 
-// --- 2. a séma és a teszt-manifest mindig együtt bővül ---
+// --- SZIGORÚ MÓD innentől ---
+
+// --- 2. az adatbázis a forrás igazság: melyik táblának van company_id oszlopa, ---
+//        és melyik security definer függvény dolgozik company_id-val
+const discoveredTables = psqlRows(
+  `select table_name from information_schema.columns ` +
+    `where table_schema='public' and column_name='company_id' ` +
+    `order by table_name;`
+);
+
+const discoveredRpcs = psqlRows(
+  `select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace ` +
+    `where n.nspname='public' and p.prosecdef and p.prosrc ilike '%company_id%' ` +
+    `order by p.proname;`
+);
+
+// --- 3. a manifest üres-e ---
 if (TENANT_TABLES.length === 0 && TENANT_RPCS.length === 0) {
   fail(
     'A public.mk_companies tábla létezik, de a tests/cross-tenant/manifest.mjs\n' +
@@ -74,11 +104,32 @@ if (TENANT_TABLES.length === 0 && TENANT_RPCS.length === 0) {
       'Szabály: minden company_id-t kapó tábla és minden security definer RPC\n' +
       '(mk_terminal_*, mk_archive_*, mk_set_pin) ugyanabban a pull requestben kerül\n' +
       'be a manifestbe, amelyikben a séma bővül. Vedd fel a manifestbe, mielőtt ez\n' +
-      'a teszt zöldet adhatna.'
+      'a teszt zöldet adhatna.\n\n' +
+      `Az adatbázisban jelenleg company_id oszloppal rendelkező táblák: ${discoveredTables.join(', ') || '(egy sem)'}\n` +
+      `company_id-t használó security definer függvények: ${discoveredRpcs.join(', ') || '(egy sem)'}`
   );
 }
 
-// --- 3. tábla-szintű ellenőrzés: minden manifestben szereplő táblának legyen company oszlopa ---
+// --- 4. a manifest teljessége: a séma dönt, nem az emlékezetünk ---
+const manifestTableNames = new Set(TENANT_TABLES.map((t) => t.table));
+const manifestRpcNames = new Set(TENANT_RPCS.map((r) => r.name));
+
+const missingTables = discoveredTables.filter((t) => !manifestTableNames.has(t));
+const missingRpcs = discoveredRpcs.filter((r) => !manifestRpcNames.has(r));
+
+if (missingTables.length || missingRpcs.length) {
+  fail(
+    'Az adatbázisban vannak company_id-s táblák/RPC-k, amik nincsenek felvéve a\n' +
+      'tests/cross-tenant/manifest.mjs-be:\n' +
+      (missingTables.length ? `\nHiányzó táblák (TENANT_TABLES):\n - ${missingTables.join('\n - ')}\n` : '') +
+      (missingRpcs.length ? `\nHiányzó RPC-k (TENANT_RPCS):\n - ${missingRpcs.join('\n - ')}\n` : '') +
+      '\nVedd fel ezeket a manifestbe (a hozzájuk tartozó kereszt-bérlős próba ' +
+      'leírásával együtt), mielőtt ez a teszt zöldet adhatna.'
+  );
+}
+
+// --- 5. tábla-szintű ellenőrzés: minden manifestben szereplő táblának tényleg ---
+//        legyen company oszlopa (elgépelt/elavult manifest-bejegyzés ellen)
 const schemaProblems = [];
 for (const t of TENANT_TABLES) {
   const col = t.companyColumn ?? 'company_id';
@@ -96,7 +147,7 @@ if (schemaProblems.length) {
   );
 }
 
-// --- 4. a tényleges kereszt-bérlős próba: két próba-cég + felhasználó, ---
+// --- 6. a tényleges kereszt-bérlős próba: két próba-cég + felhasználó, ---
 //        A cég session-jével B cég adataira/RPC-ire
 await runCrossTenantProbe();
 
@@ -184,8 +235,9 @@ async function runCrossTenantProbe() {
     fail('KERESZT-BÉRLŐS SZIVÁRGÁS ÉSZLELVE:\n - ' + leaks.join('\n - '));
   }
 
-  console.log(
-    `Kereszt-teszt: OK – ${TENANT_TABLES.length} tábla és ${TENANT_RPCS.length} RPC ` +
-      'mindegyike helyesen elutasította a másik cég adatára irányuló hozzáférést.'
+  pass(
+    `${TENANT_TABLES.length} tábla és ${TENANT_RPCS.length} RPC mindegyike helyesen ` +
+      'elutasította a másik cég adatára irányuló hozzáférést, és a manifest lefedi ' +
+      'az adatbázisban talált összes company_id-s táblát/RPC-t.'
   );
 }

@@ -4,8 +4,11 @@
 // SZABÁLY: minden company_id-t kapó tábla és minden security definer RPC
 // (mk_terminal_*, mk_archive_*, mk_set_pin, stb.) EBBEN A FÁJLBAN kerül
 // felvételre, UGYANABBAN a pull requestben, amelyik a táblát/RPC-t bevezeti
-// vagy company_id-val bővíti. A run.mjs addig szándékosan elbukik, amíg ez a
-// két lista üres, hogy ezt a szabályt ne lehessen elfelejteni.
+// vagy company_id-val bővíti. A run.mjs nem az emlékezetünkre hagyatkozik:
+// magában az adatbázisban keresi meg a company_id oszlopos táblákat és a
+// company_id-t használó security definer függvényeket, és amint a
+// public.mk_companies tábla létezik, BUKÁS lesz, ha bármelyiket nem találja
+// itt (vagy ha ez a két lista még teljesen üres).
 
 /**
  * @typedef {Object} TenantTable
