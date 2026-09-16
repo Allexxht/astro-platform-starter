@@ -34,7 +34,7 @@ jobs:
       - name: Node beállítása
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Supabase CLI telepítése
         uses: supabase/setup-cli@v1
