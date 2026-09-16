@@ -7,6 +7,13 @@ Supabase projekten való futtatásának lépéssora. Lásd még: `CLAUDE.md`
 **Alapszabály: élesben csak akkor futtass bármit, ha a staging végigment
 hiba nélkül, és a lenti ellenőrző lista minden pontja rendben van.**
 
+A `cross-tenant-rollback-test` CI job (`.github/workflows/cross-tenant-test.yml`)
+minden PR-on automatikusan kipróbálja a `003_multitenant.sql` + a hozzá
+tartozó rollback scriptet egy eldobható adatbázison, és bájtra pontosan
+ellenőrzi, hogy a séma és minden tábla sorszáma pontosan visszaáll-e – ez
+a lenti lépéssor helyességét adja, nem helyettesíti (a te futásod éles
+adaton, valódi Storage-fájlokkal történik, azt a CI nem tudja lemodellezni).
+
 ## 0. Amire szükséged lesz
 
 - A **staging** Supabase projekt "Direct connection" Postgres URI-ja
@@ -53,6 +60,14 @@ psql "postgresql://postgres:<STAGING_DB_JELSZÓ>@db.fbkcjvplcsnenjgsirfx.supabas
 Ellenőrzés: a táblák sorszáma stagingen egyezzen az éles projektével (pl.
 `select count(*) from mk_employees;` mindkét projekten).
 
+## 2.5. "Előtte" pillanatkép mentése (ezt MÉG A MIGRÁCIÓ ELŐTT fusd le)
+
+Staging SQL Editor → új query → illeszd be a **`db/verify-migration-before.sql`**
+teljes tartalmát → Run. Ez elmenti a jelenlegi (migráció előtti) sorszámokat
+egy ideiglenes táblába (`_migration_verify_snapshot`), amit az 5. lépés
+ellenőrző scriptje a migráció UTÁN fog összehasonlítani a ténylegessel. Ha
+ezt kihagyod, az 5. lépés ellenőrzése nem tud számokkal összehasonlítani.
+
 ## 3. Szintetikus teszt-felhasználó stagingre
 
 Mivel az `auth.users`-t nem másoltuk át, a migráció `mk_profiles` backfillje
@@ -71,33 +86,25 @@ tetszőleges jelszó). Ezek lesznek a migráció után `role='owner'`.
 
 ## 5. Ellenőrző lista stagingen (ezt fusd le, mielőtt élesre mész)
 
-Mind SQL Editorban futtatható lekérdezések, staging projekten:
+Staging SQL Editor → új query → illeszd be a **`db/verify-migration-after.sql`**
+teljes tartalmát → Run. Ez a 2.5. lépésben elmentett "előtte" pillanatképet
+hasonlítja össze a ténylegessel, és egyetlen összegző sorban megmondja, hogy
+minden rendben van-e:
 
-```sql
--- 1) pontosan egy cég jött létre
-select count(*) from mk_companies;                         -- 1
+- **Sorszám-ellenőrzés** táblánként (nem veszett-e el sor a migráció alatt).
+- **`company_id`-ellenőrzés** táblánként (mindegyik sor kapott-e céget).
+- **`mk_companies`**: pontosan 1 sor (BREMAT).
+- **`mk_profiles`**: legalább 1 `owner` (a 3. lépésben létrehozott teszt-felhasználó(k)).
+- **Storage**: hány `mk_attachments` sorhoz van ténylegesen meglévő objektum
+  a Storage-ban az új, `<company_id>/` prefixű útvonalon. Ha a
+  `scripts/migrate-storage-to-company-prefix.mjs` még nem futott (lásd 8.
+  lépés, élesben; stagingen csak akkor releváns, ha oda is átmásoltad a
+  storage objektumokat), ez a sor jelzi, hogy még hiányoznak – ez ilyenkor
+  **nem hiba**, csak korai állapot.
 
--- 2) minden meglévő sor kapott company_id-t (mindegyik 0-t adjon vissza)
-select count(*) from mk_teams        where company_id is null;
-select count(*) from mk_locations    where company_id is null;
-select count(*) from mk_employees    where company_id is null;
-select count(*) from mk_tasks        where company_id is null;
-select count(*) from mk_terminals    where company_id is null;
-select count(*) from mk_assignments  where company_id is null;
-select count(*) from mk_attachments  where company_id is null;
-select count(*) from mk_events       where company_id is null;
-select count(*) from mk_pins         where company_id is null;
-
--- 3) a szintetikus teszt-felhasználó(k) owner lett(ek)
-select u.email, p.role from mk_profiles p join auth.users u on u.id = p.user_id;
-
--- 4) sortartalom nem veszett el (hasonlítsd össze a 2. lépés előtti számokkal)
-select 'teams' t, count(*) from mk_teams union all
-select 'employees', count(*) from mk_employees union all
-select 'tasks', count(*) from mk_tasks union all
-select 'assignments', count(*) from mk_assignments union all
-select 'events', count(*) from mk_events;
-```
+A végén egy `osszegzes` sor: **„✅ OK”** vagy **„❌ HIÁNYOSSÁGOK”**, alatta a
+pontos részletek soronként (HIBA-k előbb). Ha bármi HIBA, ne menj tovább,
+derítsd ki, mi hiányzik, mielőtt élesre mész.
 
 Ezután **a valódi appon keresztül** is nézd meg:
 - Jelentkezz be a staging projekttel (ideiglenesen írd át a
@@ -160,12 +167,18 @@ tovább az éles migrációra.
 Csak akkor, ha az 5. lépés minden pontja stagingen rendben volt, ÉS a 7.
 lépés mentése igazoltan visszatölthető:
 
-1. Éles Dashboard → SQL Editor → `db/migrations/003_multitenant.sql` teljes
+1. Éles Dashboard → SQL Editor → `db/verify-migration-before.sql` teljes
+   tartalma → Run (elmenti az éles "előtte" pillanatképet).
+2. Éles Dashboard → SQL Editor → `db/migrations/003_multitenant.sql` teljes
    tartalma → Run.
-2. Fuss végig az 5. lépés ellenőrző listáján, most az éles projekten.
-3. `SUPABASE_URL=https://nuufcwpbjfimykumufgi.supabase.co SUPABASE_SERVICE_ROLE_KEY=<éles service role> node scripts/migrate-storage-to-company-prefix.mjs --dry-run`
+3. Éles Dashboard → SQL Editor → `db/verify-migration-after.sql` teljes
+   tartalma → Run – az összegzés sor legyen „✅ OK”, mielőtt továbblépnél.
+4. `SUPABASE_URL=https://nuufcwpbjfimykumufgi.supabase.co SUPABASE_SERVICE_ROLE_KEY=<éles service role> node scripts/migrate-storage-to-company-prefix.mjs --dry-run`
    – nézd át a kimenetet, majd `--dry-run` nélkül futtasd valóban.
-4. Ha bármi gyanús: `db/migrations/rollback/003_multitenant_rollback.sql`
+5. Futtasd újra a `db/verify-migration-after.sql`-t – most a Storage-sornak
+   is „✅ OK”-nak kell lennie (minden csatolmányhoz van objektum az új
+   útvonalon).
+6. Ha bármi gyanús: `db/migrations/rollback/003_multitenant_rollback.sql`
    azonnal, élesben is, majd vizsgáld ki a mentésből (7. lépés), mielőtt
    újra próbálkoznál.
 
