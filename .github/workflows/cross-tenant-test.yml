@@ -138,6 +138,25 @@ jobs:
           git show "$BASE_REF:db/supabase-setup.sql" > /tmp/baseline_setup.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f /tmp/baseline_setup.sql
 
+      - name: Migráció előtti állapot előállítása, ha a bázis séma már migrált
+        # Amióta a 003 mergelve van, a db/supabase-setup.sql MAGA IS tartalmazza a
+        # többbérlős sémát – a bázis tehát már "migrált" állapot. Ha innen indulnánk
+        # mérni, a migráció no-op lenne, a rollback viszont leszedné a többbérlős
+        # részt, és az összevetés szükségszerűen eltérést találna (ez a job pontosan
+        # így bukott el a 003 mergelése után). Ezért előbb a rollback-kel hozzuk
+        # migráció előtti állapotba, és onnan indul a mérés – így a job azt méri,
+        # amit mérni akar: a migráció + rollback kör pontosan visszaadja-e a
+        # kiindulási állapotot.
+        run: |
+          set -euo pipefail
+          HAS_MT=$(psql "$DB_URL" -t -A -c "select count(*) from information_schema.tables where table_schema='public' and table_name='mk_companies';")
+          if [ "$HAS_MT" = "1" ]; then
+            echo "A bázis séma már tartalmazza a többbérlős részt – rollback a mérés kiindulópontjához."
+            psql "$DB_URL" -v ON_ERROR_STOP=1 -f db/migrations/rollback/003_multitenant_rollback.sql
+          else
+            echo "A bázis séma még nem tartalmazza a többbérlős részt – nincs teendő."
+          fi
+
       - name: Előtte-pillanatkép (séma + sorszámok táblánként)
         run: |
           set -euo pipefail
