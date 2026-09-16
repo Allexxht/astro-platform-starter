@@ -56,6 +56,15 @@ jobs:
       - name: Supabase stack kapcsolati adatainak beolvasása
         run: supabase status --workdir . -o env >> "$GITHUB_ENV"
 
+      - name: DB_URL felülírása a helyi CLI ismert alapértelmezésével
+        # A `supabase status -o env` a DB_URL-ben lévő jelszót csillagokkal
+        # elrejti (pl. "***127.0.0.1:54322/postgres"), emiatt psql nem tud vele
+        # kapcsolódni. A helyi Supabase CLI dev stack felhasználóneve/jelszava
+        # mindig postgres/postgres, a DB portja pedig a `supabase init`-tel most
+        # generált supabase/config.toml alapértelmezése (54322) – ez nem valódi
+        # titok, mert minden futásnál újra létrejövő, eldobható konténer.
+        run: echo "DB_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres" >> "$GITHUB_ENV"
+
       - name: Séma alkalmazása (db/supabase-setup.sql + db/migrations/*.sql)
         run: |
           set -euo pipefail
