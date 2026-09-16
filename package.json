@@ -7,7 +7,8 @@
         "start": "astro dev",
         "build": "astro build",
         "preview": "astro preview",
-        "astro": "astro"
+        "astro": "astro",
+        "test:cross-tenant": "node tests/cross-tenant/run.mjs"
     },
     "dependencies": {
         "@astrojs/netlify": "^6.6.0",
@@ -26,6 +27,7 @@
         "unique-names-generator": "^4.7.1"
     },
     "devDependencies": {
+        "@supabase/supabase-js": "^2.45.4",
         "@types/blobshape": "^1.0.3",
         "@types/node": "^20.12.7",
         "@types/react": "^19.2.2",

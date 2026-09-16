@@ -1,0 +1,83 @@
+name: Kereszt-teszt (cross-tenant isolation)
+
+# Lásd CLAUDE.md "Többbérlős SaaS – terv" → "Kereszt-teszt: valódi kapu, nem emlékezet".
+#
+# Ez a workflow minden PR-on és a main-re irányuló push előtt lefuttatja a
+# tests/cross-tenant/run.mjs kereszt-teszt scriptet egy eldobható, helyi Supabase
+# CLI dev stack ellen (Docker-alapú Postgres+Auth+PostgREST+Storage, NEM az éles
+# vagy a staging projekt).
+#
+# FONTOS – bootstrap vs. szigorú mód: amíg a többbérlős adatmodell (mk_companies
+# tábla) nincs megépítve, ez a job ZÖLDEN fut le, egy jól látható üzenettel, hogy
+# jelenleg nincs mit vizsgálnia (lásd run.mjs). Attól kezdve, hogy a mk_companies
+# tábla megjelenik a sémában, a teszt szigorúvá válik: az adatbázisban keres meg
+# minden company_id-s táblát/RPC-t, és bukik, ha bármelyik hiányzik a
+# tests/cross-tenant/manifest.mjs-ből, vagy ha bármelyik kereszt-bérlős próba
+# átmenne. Ez a branch protection-nel együtt (lásd CLAUDE.md) azt jelenti: a
+# main-be a jelenlegi (egycéges) kód még mergelhető ezen a workflow-n keresztül,
+# de a következő kör (adatmodell + RLS) csak akkor mergelhető, ha a manifest a
+# sémával együtt, teljesen bővül, és a kereszt-bérlős próba valóban átmegy.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  cross-tenant-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node beállítása
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Supabase CLI telepítése
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Node függőségek telepítése
+        run: npm ci
+
+      - name: Helyi Supabase projekt inicializálása (ha még nincs supabase/config.toml)
+        run: |
+          if [ ! -f supabase/config.toml ]; then
+            supabase init --workdir . --force
+          fi
+
+      - name: Helyi Supabase stack indítása (eldobható Docker Postgres+Auth+PostgREST+Storage)
+        run: supabase start --workdir .
+
+      - name: Supabase stack kapcsolati adatainak beolvasása
+        run: supabase status --workdir . -o env >> "$GITHUB_ENV"
+
+      - name: DB_URL felülírása a helyi CLI ismert alapértelmezésével
+        # A `supabase status -o env` a DB_URL-ben lévő jelszót csillagokkal
+        # elrejti (pl. "***127.0.0.1:54322/postgres"), emiatt psql nem tud vele
+        # kapcsolódni. A helyi Supabase CLI dev stack felhasználóneve/jelszava
+        # mindig postgres/postgres, a DB portja pedig a `supabase init`-tel most
+        # generált supabase/config.toml alapértelmezése (54322) – ez nem valódi
+        # titok, mert minden futásnál újra létrejövő, eldobható konténer.
+        run: echo "DB_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres" >> "$GITHUB_ENV"
+
+      - name: Séma alkalmazása (db/supabase-setup.sql + db/migrations/*.sql)
+        run: |
+          set -euo pipefail
+          echo "Alkalmazás: db/supabase-setup.sql"
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f db/supabase-setup.sql
+          for f in db/migrations/*.sql; do
+            echo "Alkalmazás: $f"
+            psql "$DB_URL" -v ON_ERROR_STOP=1 -f "$f"
+          done
+
+      - name: Kereszt-teszt futtatása
+        run: node tests/cross-tenant/run.mjs
+
+      - name: Supabase stack leállítása
+        if: always()
+        run: supabase stop --workdir . --no-backup
