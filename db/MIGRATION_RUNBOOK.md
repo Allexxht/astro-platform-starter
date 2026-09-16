@@ -7,6 +7,11 @@ Supabase projekten való futtatásának lépéssora. Lásd még: `CLAUDE.md`
 **Alapszabály: élesben csak akkor futtass bármit, ha a staging végigment
 hiba nélkül, és a lenti ellenőrző lista minden pontja rendben van.**
 
+**Két éles útvonal van leírva (1–7. lépés stagingen mindkettőhöz közös):**
+a **8. pont** a klasszikus migráció valódi adaton (jövőbeli használatra), a
+**8b. pont** a kiürítés + friss telepítés – **ez fut most**, mert az éles
+adatbázisban jelenleg nincs valódi adat (lásd 8b. pont eleje).
+
 A `cross-tenant-rollback-test` CI job (`.github/workflows/cross-tenant-test.yml`)
 minden PR-on automatikusan kipróbálja a `003_multitenant.sql` + a hozzá
 tartozó rollback scriptet egy eldobható adatbázison, és bájtra pontosan
@@ -162,7 +167,14 @@ Ha ez sikerrel lefut és a célprojekt táblái/sorai megegyeznek az élessel,
 tudod, hogy a mentésből ténylegesen vissza lehet állni – csak ez után menj
 tovább az éles migrációra.
 
-## 8. Éles migráció (ezt te futtatod, én nem)
+## 8. Éles migráció klasszikus úton (jövőbeli valós adathoz – MOST NEM ez fut)
+
+**A mostani BREMAT-átállásra a 8b. pontot használjuk** (lásd lent), mert az
+éles adatbázisban jelen pillanatban nincs valódi adat (csak "Teszt Elek" és
+próba-sorok) – ilyenkor egyszerűbb és kockázatmentesebb egy friss telepítés,
+mint egy éles migráció. Ez a szakasz a **klasszikus migrációs útvonalat**
+dokumentálja, ami akkor kell, ha már van valódi, visszaállítatlan éles adat
+(pl. egy jövőbeli BREMAT-migráció, vagy a 2. ügyfél, ha közös DB-be kerül).
 
 Csak akkor, ha az 5. lépés minden pontja stagingen rendben volt, ÉS a 7.
 lépés mentése igazoltan visszatölthető:
@@ -185,3 +197,137 @@ lépés mentése igazoltan visszatölthető:
 A `public/munkakovetes/index.html` `CONFIG`-ja élesben NEM változik ebben a
 körben (a service role kulcs csak a Netlify env varban van, a storage-script
 futtatásához a terminálban add meg ideiglenesen, ne mentsd el sehova).
+
+## 8b. Éles kiürítés + friss telepítés (EZ FUT MOST, mert nincs valódi adat)
+
+A döntés: mivel az éles adatbázisban nincs megőrzendő valódi adat, nem a
+klasszikus migrációt (8. pont) futtatjuk, hanem kiürítjük a `mk_` táblákat,
+és a friss (többbérlős) `db/supabase-setup.sql`-t futtatjuk le rá nulláról –
+ez pontosan az, amit CI-ban már háromszor egymás után hibamentesen
+leteszteltünk. A migráció és a rollback (`db/migrations/003_multitenant.sql`
++ `db/migrations/rollback/`) **megmarad a repóban** – a jövőbeli valós
+ügyféladathoz (2. cég, vagy egy későbbi valós BREMAT-migráció) kell majd.
+
+### 8b.1. Mentés ELŐBB – gyakorlat arra, amikor már lesz mit védeni
+
+Ugyanaz a teljes mentés, mint a 7. pontban, még akkor is, ha most nincs
+sok veszíthető adat – ez a gyakorlás arra, amikor lesz:
+
+```bash
+pg_dump "postgresql://postgres:<ÉLES_DB_JELSZÓ>@db.nuufcwpbjfimykumufgi.supabase.co:5432/postgres" \
+  --no-owner --no-privileges -Fc \
+  -f bremat_prod_backup_before_wipe_$(date +%Y%m%d_%H%M).dump
+```
+
+Ha van rá időd, próbáld vissza is tölteni egy eldobható projektbe (lásd 7.
+pont visszatöltés-próbája) – most még nem szorul rá az élet, de a gyakorlat
+számít, amikor majd igen.
+
+### 8b.2. A `mk_` táblák kiürítése
+
+Éles Dashboard → SQL Editor:
+
+```sql
+truncate table
+  public.mk_events,
+  public.mk_assignment_attachments,
+  public.mk_attachments,
+  public.mk_assignments,
+  public.mk_pins,
+  public.mk_pin_failures,
+  public.mk_employees,
+  public.mk_tasks,
+  public.mk_terminals,
+  public.mk_teams,
+  public.mk_locations
+cascade;
+```
+
+(`mk_companies`/`mk_profiles`/`mk_platform_admins` nem szerepel a listában –
+azok még nem léteznek élesben, a friss `supabase-setup.sql` hozza létre
+őket egy lépéssel lejjebb.)
+
+Ha korábban feltöltöttél próba-rajzot a `mk-rajzok` Storage bucketbe: töröld
+kézzel a Dashboard Storage nézetében (a `TRUNCATE` csak az `mk_attachments`
+DB-sort törli, a tényleges fájlt a Storage-ban nem).
+
+### 8b.3. Mi maradhat ott a régi állapotból, és mit kell még takarítani
+
+A jó hír: a legtöbb dolog **önmagát gyógyítja**, mert a friss
+`db/supabase-setup.sql` mindenhol `drop ... if exists` / `create or replace`
+mintát használ, nem pedig "csak ha még nincs":
+
+- **RLS policy-k** (a régi `office_all` és a `storage.objects`-en lévő
+  régi policy-k): a script eldobja és újra létrehozza őket a többbérlős
+  verzióval – nincs kézi teendő.
+- **RPC függvények** (`mk_terminal_*`, `mk_archive_*`, `mk_set_pin`,
+  `mk__pin_employee`): `create or replace function` – felülíródnak.
+  Nincs kézi teendő.
+- **Triggerek** (`mk_set_company_id_trg`, `mk_lock_company_id_trg`): a
+  script `drop trigger if exists` + újra létrehozás – nincs kézi teendő.
+- **Realtime publikáció** (`mk_events`/`mk_assignments` a
+  `supabase_realtime`-ban): a script már eleve hibakezelve próbálja
+  hozzáadni (`duplicate_object` esetén csendben átlép) – nincs kézi teendő.
+- **`mk_companies`/`mk_profiles`/`mk_platform_admins` táblák**: még nem
+  léteznek élesben (a migráció még sosem futott ott), a friss script
+  létrehozza őket – nincs mit takarítani.
+
+Amit **kézzel** kell megnézni:
+
+- **`storage.objects` a `mk-rajzok` bucketben** – ha a 8b.2. pontban nem
+  törölted ki a próba-fájlokat a Storage felületén, azok árván ott
+  maradnak (nem funkcionális kockázat, csak felesleges hely/zavaró audit).
+- **Bármi, amit korábban kézzel, kísérletként hoztál létre** élesben (pl.
+  ha véletlenül bármikor futtattad a `db/verify-migration-before.sql`-t
+  élesben, ami létrehozott egy `_migration_verify_snapshot` táblát) –
+  ha ilyen van: `drop table if exists public._migration_verify_snapshot;`
+
+### 8b.4. A friss séma telepítése
+
+Éles Dashboard → SQL Editor → `db/supabase-setup.sql` teljes tartalma (ez a
+PR-ban lévő, többbérlős verzió) → Run.
+
+### 8b.5. auth.users ↔ mk_profiles ellenőrzés
+
+Éles Dashboard → SQL Editor → `db/verify-auth-profiles.sql` teljes tartalma
+→ Run. Az összegzés sor legyen „✅ OK”. Ha valamelyik meglévő irodai
+bejelentkezési fiók (`auth.users`) profil nélkül maradt – ez azt jelentené,
+hogy be tudna lépni, de üres/hibás képernyőt kapna, mert nincs cégéhez
+kötve –, azt a hiányt a lenti móddal oldd fel, mielőtt bárkinek elküldöd
+az új linket:
+
+```sql
+insert into public.mk_profiles (user_id, company_id, role)
+select '<a hiányzó user_id a fenti listából>', (select id from public.mk_companies limit 1), 'owner';
+```
+
+### 8b.6. Törzsadatok kézi felvétele (~fél óra)
+
+Az irodai felületen (Törzsadatok fül): a friss séma a mai BREMAT-mintájú
+alapadatokkal indul (Hegesztők/Lakatosok/Raktár/Iroda csapatok, 1-es/2-es/
+3-as csarnok + Raktár + Iroda helyszín, mintafeladatok, 3 tablet, "Teszt
+Elek" dolgozó). Ezeket írd át/bővítsd a valódi adatokra: valódi dolgozók
+(csapattal, PIN-nel), valódi feladatok (helyszín, szín, leírás), a valódi
+tabletek linkjei kiosztva a csarnokokban. A "Teszt Elek" dolgozót ezután
+archiváld vagy töröld (Törzsadatok → Dolgozók).
+
+### 8b.7. Végigkattintós ellenőrző lista
+
+Ezt fusd végig az élesített appon, mielőtt a csapatnak átadod:
+
+- [ ] **Belépés** irodai felhasználónévvel/jelszóval sikeres, a fejlécben a
+      helyes név jelenik meg.
+- [ ] **Törzsadat felvétele**: egy új dolgozó és egy új feladat létrehozása
+      a Törzsadatok fülön, mindkettő megjelenik a heti tervben.
+- [ ] **Tablet PIN-nel**: a tablet linkje (`?terminal=<mk_terminals.id>`)
+      megnyitva, PIN beírva, a dolgozó neve és a mai beosztása megjelenik.
+- [ ] **Kezdés**: feladat elindítva a tableten, az élő nézetben azonnal
+      (Realtime) megjelenik "Dolgozik" állapotban.
+- [ ] **Rajz csatolása és megnyitása**: a heti tervben egy beosztáshoz
+      rajz feltöltve, a tableten a beosztott munka kártyáján megjelenik a
+      "Rajz megnyitása" gomb, és a rajz tényleg megnyílik (kép: pinch zoom;
+      PDF: lapozás).
+- [ ] **Élő nézet**: a csoportosítás (helyszín/csapat szerint) helyesen
+      mutatja a dolgozó állapotát, helyét, munkaidejét.
+- [ ] **Riport**: a Riportok fülön egy tetszőleges időszakra (pl. "Ez a
+      hét") betöltődik mind a négy alfül, és az Excel letöltés is működik.
