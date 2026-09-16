@@ -90,9 +90,15 @@ const discoveredTables = psqlRows(
     `order by table_name;`
 );
 
+// Kihagyjuk a trigger-függvényeket (nem hívhatók RPC-ként) és a nulla
+// paraméterű "ki vagyok" segédfüggvényeket (pl. mk_current_company()) –
+// ezeknek nincs "másik cég azonosítója", amivel egy kereszt-bérlős próbát
+// egyáltalán értelmes lenne rájuk futtatni, mindig csak a hívó saját
+// kontextusát adják vissza.
 const discoveredRpcs = psqlRows(
   `select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace ` +
     `where n.nspname='public' and p.prosecdef and p.prosrc ilike '%company_id%' ` +
+    `and p.prorettype <> 'trigger'::regtype and p.pronargs > 0 ` +
     `order by p.proname;`
 );
 
@@ -163,6 +169,45 @@ async function createTestCompany(admin, name) {
   return { id: data.id, name };
 }
 
+// Egy teljes, önmagában is életszerű próba-cég: terminál, dolgozó (PIN-nel),
+// feladat, mai beosztás, csatolmány – ezek adják az RPC-próbákhoz szükséges
+// valós id-kat (lásd manifest.mjs TENANT_RPCS baseArgs/otherTenantValue).
+// A `pin` szándékosan cégenként EGYEDI (a hívó adja meg), hogy egy "A PIN-je
+// B terminálján" próba tényleg ne találjon semmit B cégén belül.
+async function createTestFixture(admin, name, pin) {
+  const company = await createTestCompany(admin, name);
+  const companyId = company.id;
+
+  const insertScoped = async (table, row) => {
+    const { data, error } = await admin.from(table).insert({ ...row, company_id: companyId }).select('id').single();
+    if (error) fail(`Nem sikerült próba-sort létrehozni (${table}, ${name}): ${error.message}`);
+    return data.id;
+  };
+
+  const terminalId = await insertScoped('mk_terminals', { name: `${name} terminál` });
+  const employeeId = await insertScoped('mk_employees', { name: `${name} dolgozó` });
+  const taskId = await insertScoped('mk_tasks', { name: `${name} feladat` });
+
+  const { createHash } = await import('node:crypto');
+  const pinHash = createHash('sha256').update(pin).digest('hex');
+  const { error: pinError } = await admin
+    .from('mk_pins')
+    .insert({ employee_id: employeeId, company_id: companyId, pin_hash: pinHash });
+  if (pinError) fail(`Nem sikerült próba-PIN-t létrehozni (${name}): ${pinError.message}`);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const assignmentId = await insertScoped('mk_assignments', { employee_id: employeeId, task_id: taskId, work_date: today });
+
+  const storagePath = `${companyId}/crosstenant-test/${assignmentId}.pdf`;
+  const attachmentId = await insertScoped('mk_attachments', { storage_path: storagePath, file_name: 'test.pdf' });
+  const { error: linkError } = await admin
+    .from('mk_assignment_attachments')
+    .insert({ assignment_id: assignmentId, attachment_id: attachmentId, company_id: companyId });
+  if (linkError) fail(`Nem sikerült próba-csatolmányt hozzákapcsolni (${name}): ${linkError.message}`);
+
+  return { id: companyId, name, terminalId, employeeId, taskId, assignmentId, attachmentId, pin };
+}
+
 async function createTestUser(admin, companyId, role) {
   const email = `crosstenant-test-${companyId}-${role}@example.invalid`;
   const password = `Test-${Math.random().toString(36).slice(2)}-Aa1!`;
@@ -199,8 +244,8 @@ async function runCrossTenantProbe() {
   const { createClient } = await import('@supabase/supabase-js');
   const admin = createClient(API_URL, SERVICE_ROLE_KEY);
 
-  const companyA = await createTestCompany(admin, 'Kereszt-teszt A cég');
-  const companyB = await createTestCompany(admin, 'Kereszt-teszt B cég');
+  const companyA = await createTestFixture(admin, 'Kereszt-teszt A cég', '1357');
+  const companyB = await createTestFixture(admin, 'Kereszt-teszt B cég', '2468');
   const userA = await createTestUser(admin, companyA.id, 'owner');
   await createTestUser(admin, companyB.id, 'owner');
 
@@ -224,10 +269,20 @@ async function runCrossTenantProbe() {
   }
 
   for (const r of TENANT_RPCS) {
-    const args = { ...r.baseArgs, [r.crossTenantArg]: r.otherTenantValue(companyB) };
-    const { error } = await clientA.rpc(r.name, args);
-    if (!error) {
-      leaks.push(`${r.name}: B cég azonosítójával hívva NEM adott hibát (pedig el kellett volna utasítania)`);
+    const base = r.baseArgs ? r.baseArgs(companyA) : {};
+    const args = { ...base, [r.crossTenantArg]: r.otherTenantValue(companyB) };
+    const { data, error } = await clientA.rpc(r.name, args);
+    const expect = r.expect ?? 'error';
+
+    if (expect === 'error') {
+      if (!error) leaks.push(`${r.name}: nem adott hibát B cég adatával hívva (pedig el kellett volna utasítania)`);
+    } else if (expect === 'null') {
+      const empty = data == null || (Array.isArray(data) && data.length === 0);
+      if (!error && !empty) leaks.push(`${r.name}: hiba nélkül, NEM üres/null adatot adott vissza (${JSON.stringify(data)})`);
+      if (error) leaks.push(`${r.name}: hibával tért vissza, pedig csendes null választ vártunk (${error.message})`);
+    } else if (typeof expect === 'function') {
+      if (error) leaks.push(`${r.name}: váratlan hiba a tartalom-ellenőrzésnél (${error.message})`);
+      else if (!expect(data, companyA, companyB)) leaks.push(`${r.name}: a válasz tartalma nem felel meg az elvárt cég-elhatárolásnak (${JSON.stringify(data)})`);
     }
   }
 
@@ -237,7 +292,8 @@ async function runCrossTenantProbe() {
 
   pass(
     `${TENANT_TABLES.length} tábla és ${TENANT_RPCS.length} RPC mindegyike helyesen ` +
-      'elutasította a másik cég adatára irányuló hozzáférést, és a manifest lefedi ' +
-      'az adatbázisban talált összes company_id-s táblát/RPC-t.'
+      'elutasította (vagy a tervezettnek megfelelően korlátozta) a másik cég adatára ' +
+      'irányuló hozzáférést, és a manifest lefedi az adatbázisban talált összes ' +
+      'company_id-s táblát/RPC-t.'
   );
 }

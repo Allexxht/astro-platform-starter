@@ -34,7 +34,7 @@ jobs:
       - name: Node beállítása
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Supabase CLI telepítése
         uses: supabase/setup-cli@v1
@@ -54,11 +54,18 @@ jobs:
         run: supabase start --workdir .
 
       - name: Supabase stack kapcsolati adatainak beolvasása
-        run: supabase status --workdir . -o env >> "$GITHUB_ENV"
+        # A `supabase status -o env` a legtöbb értéket idézőjelbe teszi (pl.
+        # API_URL="http://..."), a DB_URL-t viszont nem. A GITHUB_ENV NEM
+        # shell, nem vágja le az idézőjeleket – azok szó szerint az env var
+        # értékének részévé válnak (pl. supabase-js URL-ellenőrzése ezen
+        # bukik el: a "-lel kezdődő string nem http(s)://-sel kezdődik).
+        # A sed lehántja a idézőjeleket minden "KEY=value" alakú sorról,
+        # a már idézőjel nélküli sorokat (pl. DB_URL) érintetlenül hagyja.
+        run: supabase status --workdir . -o env | sed -E 's/^([A-Za-z_][A-Za-z0-9_]*)="(.*)"$/\1=\2/' >> "$GITHUB_ENV"
 
       - name: DB_URL felülírása a helyi CLI ismert alapértelmezésével
-        # A `supabase status -o env` a DB_URL-ben lévő jelszót csillagokkal
-        # elrejti (pl. "***127.0.0.1:54322/postgres"), emiatt psql nem tud vele
+        # A `supabase status` a DB_URL-ben lévő jelszót csillagokkal elrejti
+        # (pl. "***127.0.0.1:54322/postgres"), emiatt psql nem tud vele
         # kapcsolódni. A helyi Supabase CLI dev stack felhasználóneve/jelszava
         # mindig postgres/postgres, a DB portja pedig a `supabase init`-tel most
         # generált supabase/config.toml alapértelmezése (54322) – ez nem valódi
@@ -77,6 +84,121 @@ jobs:
 
       - name: Kereszt-teszt futtatása
         run: node tests/cross-tenant/run.mjs
+
+      - name: Supabase stack leállítása
+        if: always()
+        run: supabase stop --workdir . --no-backup
+
+  # Külön job, saját eldobható Supabase stackkel: minden migrációt a hozzá
+  # tartozó rollback scripttel EGYÜTT próbál ki, és bájtra pontosan
+  # ellenőrzi, hogy a rollback után a séma (táblák/függvények/policy-k) és
+  # az adat (sorszámok táblánként) pontosan visszaáll-e a migráció előtti
+  # állapotra. A "migráció előtti állapot" forrása a db/supabase-setup.sql
+  # a PR/push BÁZIS commitjáról (git show) – ez automatikusan a helyes
+  # összevetési alapot adja, akárhányadik migrációt is adjuk hozzá a
+  # jövőben, anélkül hogy egy külön, kézzel karbantartott "régi séma"
+  # másolatot kellene fenntartani.
+  cross-tenant-rollback-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (teljes git history kell a migráció előtti bázishoz)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Supabase CLI telepítése
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Helyi Supabase projekt inicializálása (ha még nincs supabase/config.toml)
+        run: |
+          if [ ! -f supabase/config.toml ]; then
+            supabase init --workdir . --force
+          fi
+
+      - name: Helyi Supabase stack indítása (eldobható Docker Postgres+Auth+PostgREST+Storage)
+        run: supabase start --workdir .
+
+      - name: DB_URL beállítása (lásd a másik job azonos lépésének magyarázatát)
+        run: echo "DB_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres" >> "$GITHUB_ENV"
+
+      - name: A migráció ELŐTTI állapot alkalmazása (db/supabase-setup.sql a PR/push bázisáról)
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_REF="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE_REF="${{ github.event.before }}"
+          fi
+          if [ -z "$BASE_REF" ] || [ "$BASE_REF" = "0000000000000000000000000000000000000000" ]; then
+            BASE_REF="HEAD~1"
+          fi
+          echo "Alapállapot forrása: $BASE_REF"
+          git show "$BASE_REF:db/supabase-setup.sql" > /tmp/baseline_setup.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f /tmp/baseline_setup.sql
+
+      - name: Előtte-pillanatkép (séma + sorszámok táblánként)
+        run: |
+          set -euo pipefail
+          psql "$DB_URL" -t -A -c "select string_agg(table_name, ',' order by table_name) from information_schema.tables where table_schema='public';" > /tmp/tables_before.txt
+          psql "$DB_URL" -t -A -c "select string_agg(proname, ',' order by proname) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public';" > /tmp/funcs_before.txt
+          psql "$DB_URL" -t -A -c "select string_agg(policyname, ',' order by policyname) from pg_policies where schemaname in ('public','storage');" > /tmp/policies_before.txt
+          psql "$DB_URL" -t -A -c "
+            select string_agg(t || '=' || c, ',' order by t) from (
+              select 'mk_teams' t, count(*) c from public.mk_teams union all
+              select 'mk_locations', count(*) from public.mk_locations union all
+              select 'mk_employees', count(*) from public.mk_employees union all
+              select 'mk_tasks', count(*) from public.mk_tasks union all
+              select 'mk_terminals', count(*) from public.mk_terminals union all
+              select 'mk_assignments', count(*) from public.mk_assignments union all
+              select 'mk_attachments', count(*) from public.mk_attachments union all
+              select 'mk_assignment_attachments', count(*) from public.mk_assignment_attachments union all
+              select 'mk_events', count(*) from public.mk_events union all
+              select 'mk_pins', count(*) from public.mk_pins union all
+              select 'mk_pin_failures', count(*) from public.mk_pin_failures
+            ) x;" > /tmp/counts_before.txt
+          echo "Előtte (sorszámok):" && cat /tmp/counts_before.txt
+
+      - name: A 003_multitenant.sql alkalmazása (ennek a PR-nak/branch-nek a verziója)
+        run: psql "$DB_URL" -v ON_ERROR_STOP=1 -f db/migrations/003_multitenant.sql
+
+      - name: A rollback alkalmazása
+        run: psql "$DB_URL" -v ON_ERROR_STOP=1 -f db/migrations/rollback/003_multitenant_rollback.sql
+
+      - name: Utána-pillanatkép + összehasonlítás
+        run: |
+          set -euo pipefail
+          psql "$DB_URL" -t -A -c "select string_agg(table_name, ',' order by table_name) from information_schema.tables where table_schema='public';" > /tmp/tables_after.txt
+          psql "$DB_URL" -t -A -c "select string_agg(proname, ',' order by proname) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public';" > /tmp/funcs_after.txt
+          psql "$DB_URL" -t -A -c "select string_agg(policyname, ',' order by policyname) from pg_policies where schemaname in ('public','storage');" > /tmp/policies_after.txt
+          psql "$DB_URL" -t -A -c "
+            select string_agg(t || '=' || c, ',' order by t) from (
+              select 'mk_teams' t, count(*) c from public.mk_teams union all
+              select 'mk_locations', count(*) from public.mk_locations union all
+              select 'mk_employees', count(*) from public.mk_employees union all
+              select 'mk_tasks', count(*) from public.mk_tasks union all
+              select 'mk_terminals', count(*) from public.mk_terminals union all
+              select 'mk_assignments', count(*) from public.mk_assignments union all
+              select 'mk_attachments', count(*) from public.mk_attachments union all
+              select 'mk_assignment_attachments', count(*) from public.mk_assignment_attachments union all
+              select 'mk_events', count(*) from public.mk_events union all
+              select 'mk_pins', count(*) from public.mk_pins union all
+              select 'mk_pin_failures', count(*) from public.mk_pin_failures
+            ) x;" > /tmp/counts_after.txt
+          echo "Utána (sorszámok):" && cat /tmp/counts_after.txt
+
+          FAIL=0
+          diff -u /tmp/tables_before.txt /tmp/tables_after.txt || { echo "::error::A tábla-lista eltér a rollback után – a séma nem állt vissza pontosan."; FAIL=1; }
+          diff -u /tmp/funcs_before.txt /tmp/funcs_after.txt || { echo "::error::A függvény-lista eltér a rollback után – a séma nem állt vissza pontosan."; FAIL=1; }
+          diff -u /tmp/policies_before.txt /tmp/policies_after.txt || { echo "::error::A policy-lista eltér a rollback után – a séma nem állt vissza pontosan."; FAIL=1; }
+          diff -u /tmp/counts_before.txt /tmp/counts_after.txt || { echo "::error::Eltérő sorszám a rollback után – ADATVESZTÉS a migráció+visszaállítás körben."; FAIL=1; }
+
+          if [ "$FAIL" = "1" ]; then
+            echo "A 003_multitenant.sql + a hozzá tartozó rollback NEM állítja vissza pontosan az eredeti állapotot."
+            exit 1
+          fi
+          echo "OK: a migráció + rollback kör után a séma és minden tábla sorszáma pontosan egyezik a migráció előttivel."
 
       - name: Supabase stack leállítása
         if: always()

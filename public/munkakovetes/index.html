@@ -930,6 +930,14 @@ async function createSupabaseAdapter() {
     const { mk_assignment_attachments, ...rest } = a;
     return { ...rest, attachments: (mk_assignment_attachments || []).map(x => x.mk_attachments).filter(Boolean) };
   };
+  // A Storage útvonal <company_id>/ prefixet kap (lásd CLAUDE.md "Cégazonosítás
+  // az adatmodellben"), ehhez kell tudni, melyik cégéhez tartozik a bejelentkezett
+  // felhasználó. Egyszer kérdezzük le, munkamenetenként gyorsítótárazva.
+  let companyIdCache = null;
+  const getCompanyId = async () => {
+    if (!companyIdCache) companyIdCache = (await q(sb.from(T('profiles')).select('company_id').single())).company_id;
+    return companyIdCache;
+  };
   return {
     mode: 'live',
     async getSession() { const { data } = await sb.auth.getSession(); return data.session; },
@@ -983,7 +991,8 @@ async function createSupabaseAdapter() {
     },
     async removeAssignment(id) { await q(sb.from(T('assignments')).delete().eq('id', id)); },
     async uploadAttachment(file) {
-      const path = `${uid()}/${sanitizeFileName(file.name)}`;
+      const companyId = await getCompanyId();
+      const path = `${companyId}/${uid()}/${sanitizeFileName(file.name)}`;
       const up = await sb.storage.from(CONFIG.ATTACHMENTS_BUCKET).upload(path, file, { contentType: file.type || undefined });
       if (up.error) throw new Error(up.error.message);
       return q(sb.from(T('attachments')).insert({ storage_path: path, file_name: file.name, mime_type: file.type || null, size_bytes: file.size }).select().single());
