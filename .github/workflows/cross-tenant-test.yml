@@ -54,11 +54,18 @@ jobs:
         run: supabase start --workdir .
 
       - name: Supabase stack kapcsolati adatainak beolvasása
-        run: supabase status --workdir . -o env >> "$GITHUB_ENV"
+        # A `supabase status -o env` a legtöbb értéket idézőjelbe teszi (pl.
+        # API_URL="http://..."), a DB_URL-t viszont nem. A GITHUB_ENV NEM
+        # shell, nem vágja le az idézőjeleket – azok szó szerint az env var
+        # értékének részévé válnak (pl. supabase-js URL-ellenőrzése ezen
+        # bukik el: a "-lel kezdődő string nem http(s)://-sel kezdődik).
+        # A sed lehántja a idézőjeleket minden "KEY=value" alakú sorról,
+        # a már idézőjel nélküli sorokat (pl. DB_URL) érintetlenül hagyja.
+        run: supabase status --workdir . -o env | sed -E 's/^([A-Za-z_][A-Za-z0-9_]*)="(.*)"$/\1=\2/' >> "$GITHUB_ENV"
 
       - name: DB_URL felülírása a helyi CLI ismert alapértelmezésével
-        # A `supabase status -o env` a DB_URL-ben lévő jelszót csillagokkal
-        # elrejti (pl. "***127.0.0.1:54322/postgres"), emiatt psql nem tud vele
+        # A `supabase status` a DB_URL-ben lévő jelszót csillagokkal elrejti
+        # (pl. "***127.0.0.1:54322/postgres"), emiatt psql nem tud vele
         # kapcsolódni. A helyi Supabase CLI dev stack felhasználóneve/jelszava
         # mindig postgres/postgres, a DB portja pedig a `supabase init`-tel most
         # generált supabase/config.toml alapértelmezése (54322) – ez nem valódi
