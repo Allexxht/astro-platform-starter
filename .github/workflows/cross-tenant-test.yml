@@ -1,0 +1,69 @@
+name: Kereszt-teszt (cross-tenant isolation)
+
+# Lásd CLAUDE.md "Többbérlős SaaS – terv" → "Kereszt-teszt: valódi kapu, nem emlékezet".
+#
+# Ez a workflow minden PR-on és a main-re irányuló push előtt lefuttatja a
+# tests/cross-tenant/run.mjs kereszt-teszt scriptet egy eldobható, helyi Supabase
+# CLI dev stack ellen (Docker-alapú Postgres+Auth+PostgREST+Storage, NEM az éles
+# vagy a staging projekt).
+#
+# FONTOS: amíg a többbérlős adatmodell (mk_companies, mk_profiles, company_id,
+# RLS) nincs megépítve, ez a job SZÁNDÉKOSAN pirosra fut – a run.mjs explicit
+# hibával áll le, nem ad hamis zöldet. Ez a branch protection-nel együtt (lásd
+# CLAUDE.md) azt jelenti, hogy amíg a következő kör (adatmodell + RLS) el nem
+# készül, a main-be semmi nem mergelhető ezen a workflow-n keresztül. Ez szándékos.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  cross-tenant-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node beállítása
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Supabase CLI telepítése
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Node függőségek telepítése
+        run: npm ci
+
+      - name: Helyi Supabase projekt inicializálása (ha még nincs supabase/config.toml)
+        run: |
+          if [ ! -f supabase/config.toml ]; then
+            supabase init --workdir . --force
+          fi
+
+      - name: Helyi Supabase stack indítása (eldobható Docker Postgres+Auth+PostgREST+Storage)
+        run: supabase start --workdir .
+
+      - name: Supabase stack kapcsolati adatainak beolvasása
+        run: supabase status --workdir . -o env >> "$GITHUB_ENV"
+
+      - name: Séma alkalmazása (db/supabase-setup.sql + db/migrations/*.sql)
+        run: |
+          set -euo pipefail
+          echo "Alkalmazás: db/supabase-setup.sql"
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f db/supabase-setup.sql
+          for f in db/migrations/*.sql; do
+            echo "Alkalmazás: $f"
+            psql "$DB_URL" -v ON_ERROR_STOP=1 -f "$f"
+          done
+
+      - name: Kereszt-teszt futtatása
+        run: node tests/cross-tenant/run.mjs
+
+      - name: Supabase stack leállítása
+        if: always()
+        run: supabase stop --workdir . --no-backup
