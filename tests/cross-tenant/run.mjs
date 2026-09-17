@@ -229,6 +229,93 @@ async function createTestUser(admin, companyId, role) {
   return { email, password, id: userData.user.id };
 }
 
+/**
+ * Célzott próbák: saját company_id / szerepkör átírása, licenc-mező írása, és
+ * hogy lejárt licencnél az írás ADATBÁZIS szinten bukik-e el (nem csak a
+ * felületen). Minden talált gond a `leaks` tömbbe kerül, hogy egy futásból
+ * kiderüljön az összes, ne csak az első.
+ */
+async function runPrivilegeProbes(admin, clientA, companyA, companyB, userA, leaks) {
+  // 1) A saját cégét ne tudja átírni (a company_id oszlopra nincs is GRANT-ja,
+  //    és a policy sem engedné a saját sorát módosítani).
+  const { error: selfCompanyError } = await clientA
+    .from('mk_profiles')
+    .update({ company_id: companyB.id })
+    .eq('user_id', userA.id);
+  if (!selfCompanyError) {
+    const { data } = await admin.from('mk_profiles').select('company_id').eq('user_id', userA.id).single();
+    if (data?.company_id !== companyA.id) {
+      leaks.push('mk_profiles: a felhasználó ÁT TUDTA ÍRNI a saját company_id-jét egy másik cégre');
+    }
+  }
+
+  // 2) A saját szerepkörét ne tudja átírni (a policy kizárja a saját sorát).
+  //    userA owner, ezért a próba VALÓDI változtatás: 'office'-ra állítani.
+  //    Ha ez sikerülne, egy owner le tudná magát fokozni – vagy fordítva, egy
+  //    irodai felhasználó fel tudná magát minősíteni ugyanezen az úton.
+  const { data: roleBefore } = await admin.from('mk_profiles').select('role').eq('user_id', userA.id).single();
+  await clientA.from('mk_profiles').update({ role: 'office' }).eq('user_id', userA.id);
+  const { data: roleAfter } = await admin.from('mk_profiles').select('role').eq('user_id', userA.id).single();
+  if (roleBefore?.role !== roleAfter?.role) {
+    leaks.push(
+      `mk_profiles: a felhasználó ÁT TUDTA ÍRNI a saját szerepkörét (${roleBefore?.role} → ${roleAfter?.role})`
+    );
+  }
+
+  // 3) A licenc-mezőkhöz authenticated EGYÁLTALÁN ne nyúlhasson (oszlop-szintű
+  //    GRANT/REVOKE, nem csak RLS – ezért ennek hibát KELL adnia).
+  const { error: licError } = await clientA
+    .from('mk_companies')
+    .update({ license_expires_at: new Date(Date.now() + 31536000000).toISOString() })
+    .eq('id', companyA.id);
+  if (!licError) {
+    leaks.push('mk_companies: az irodai felhasználó ÁT TUDTA ÍRNI a license_expires_at mezőt (csak platform adminnak szabadna)');
+  }
+  const { error: activeError } = await clientA.from('mk_companies').update({ active: true }).eq('id', companyA.id);
+  if (!activeError) {
+    leaks.push('mk_companies: az irodai felhasználó át tudta írni az active mezőt (csak platform adminnak szabadna)');
+  }
+
+  // 4) Lejárt licencnél az írás a DB-ben bukjon el. A licencet service role-lal
+  //    állítjuk múltbelire (ahogy a valódi rendszergazda-végpont tenné), majd
+  //    ugyanazzal a bejelentkezett klienssel próbálunk írni.
+  await admin
+    .from('mk_companies')
+    .update({ license_expires_at: new Date(Date.now() - 86400000).toISOString() })
+    .eq('id', companyA.id);
+
+  const { error: expiredInsert } = await clientA.from('mk_tasks').insert({ name: 'lejart-licenc-proba' });
+  if (!expiredInsert) leaks.push('licenc: lejárt előfizetéssel SIKERÜLT új feladatot beszúrni');
+
+  const { error: expiredUpdate, count: updatedCount } = await clientA
+    .from('mk_tasks')
+    .update({ name: 'lejart-licenc-atiras' }, { count: 'exact' })
+    .eq('id', companyA.taskId);
+  if (!expiredUpdate && (updatedCount ?? 0) > 0) {
+    leaks.push('licenc: lejárt előfizetéssel SIKERÜLT feladatot módosítani');
+  }
+
+  const { error: expiredDelete, count: deletedCount } = await clientA
+    .from('mk_assignments')
+    .delete({ count: 'exact' })
+    .eq('id', companyA.assignmentId);
+  if (!expiredDelete && (deletedCount ?? 0) > 0) {
+    leaks.push('licenc: lejárt előfizetéssel SIKERÜLT beosztást törölni');
+  }
+
+  // A tablet útja is: az esemény-rögzítésnek hibát kell dobnia.
+  const { error: expiredEvent } = await clientA.rpc('mk_terminal_event', {
+    p_terminal: companyA.terminalId,
+    p_pin: companyA.pin,
+    p_type: 'start',
+    p_task: companyA.taskId,
+  });
+  if (!expiredEvent) leaks.push('licenc: lejárt előfizetéssel a tablet MÉGIS tudott eseményt rögzíteni');
+
+  // Visszaállítás, hogy a további próbák ne egy lejárt cégen fussanak.
+  await admin.from('mk_companies').update({ license_expires_at: null }).eq('id', companyA.id);
+}
+
 async function runCrossTenantProbe() {
   const API_URL = process.env.API_URL;
   const ANON_KEY = process.env.ANON_KEY;
@@ -285,6 +372,15 @@ async function runCrossTenantProbe() {
       else if (!expect(data, companyA, companyB)) leaks.push(`${r.name}: a válasz tartalma nem felel meg az elvárt cég-elhatárolásnak (${JSON.stringify(data)})`);
     }
   }
+
+  // ---------------------------------------------------------------------
+  // Célzott jogosultsági próbák (CLAUDE.md "Cégazonosítás az adatmodellben"
+  // → "Ki írhatja az mk_profiles és mk_companies táblákat" + "Licenc").
+  // Ezek nem "másik cég adatára" irányulnak, hanem arra a három dologra,
+  // amit a terv a legkritikusabbnak nevez: a saját cég/szerepkör átírása és
+  // a licenc-mezőhöz nyúlás. Ezért kapnak külön próbát, nem a fenti ciklusban.
+  // ---------------------------------------------------------------------
+  await runPrivilegeProbes(admin, clientA, companyA, companyB, userA, leaks);
 
   if (leaks.length) {
     fail('KERESZT-BÉRLŐS SZIVÁRGÁS ÉSZLELVE:\n - ' + leaks.join('\n - '));
