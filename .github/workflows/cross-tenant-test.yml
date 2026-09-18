@@ -138,24 +138,34 @@ jobs:
           git show "$BASE_REF:db/supabase-setup.sql" > /tmp/baseline_setup.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f /tmp/baseline_setup.sql
 
-      - name: Migráció előtti állapot előállítása, ha a bázis séma már migrált
-        # Amióta a 003 mergelve van, a db/supabase-setup.sql MAGA IS tartalmazza a
-        # többbérlős sémát – a bázis tehát már "migrált" állapot. Ha innen indulnánk
-        # mérni, a migráció no-op lenne, a rollback viszont leszedné a többbérlős
-        # részt, és az összevetés szükségszerűen eltérést találna (ez a job pontosan
-        # így bukott el a 003 mergelése után). Ezért előbb a rollback-kel hozzuk
-        # migráció előtti állapotba, és onnan indul a mérés – így a job azt méri,
-        # amit mérni akar: a migráció + rollback kör pontosan visszaadja-e a
-        # kiindulási állapotot.
+      - name: Migráció előtti állapot előállítása (MINDEN rollback, fordított sorrendben)
+        # Amióta a migrációk mergelve vannak, a db/supabase-setup.sql MAGA IS
+        # tartalmazza a tartalmukat – a bázis tehát már "migrált" állapot. Ha innen
+        # indulnánk mérni, a migrációk no-opok lennének, a rollbackek viszont
+        # leszednék a sémát, és az összevetés szükségszerűen eltérést találna.
+        # Ezért előbb VISSZAFELÉ végigfuttatjuk az összes rollbackot (004, majd 003),
+        # és onnan, a migráció előtti állapotból indul a mérés.
+        #
+        # Miért fordított sorrendben: a későbbi migráció a korábbira épül (a 004
+        # licenc-triggere például a 003 mk_current_company() függvényét hívja) –
+        # ha a 003-at szednénk le előbb, a 004 maradéka hivatkozna egy már nem
+        # létező függvényre. Pontosan így bukott el ez a job a 004 mergelése után.
+        #
+        # A hibatűrés szándékos: ha egy rollback azért hibázik, mert az a migráció
+        # nincs is benne a bázisban (pl. a PR most vezeti be), az nem baj – a
+        # rollback scriptek egy tranzakcióban futnak, tehát vagy teljesen lefutnak,
+        # vagy semmit nem csinálnak. A tényleges állítást a lenti összevetés adja.
         run: |
-          set -euo pipefail
-          HAS_MT=$(psql "$DB_URL" -t -A -c "select count(*) from information_schema.tables where table_schema='public' and table_name='mk_companies';")
-          if [ "$HAS_MT" = "1" ]; then
-            echo "A bázis séma már tartalmazza a többbérlős részt – rollback a mérés kiindulópontjához."
-            psql "$DB_URL" -v ON_ERROR_STOP=1 -f db/migrations/rollback/003_multitenant_rollback.sql
-          else
-            echo "A bázis séma még nem tartalmazza a többbérlős részt – nincs teendő."
-          fi
+          set -uo pipefail
+          for f in $(ls -1 db/migrations/rollback/*.sql | sort -r); do
+            echo "Visszaállítás a kiinduló állapothoz: $f"
+            if psql "$DB_URL" -v ON_ERROR_STOP=1 -f "$f" > /tmp/rb.log 2>&1; then
+              echo "  alkalmazva"
+            else
+              echo "  kihagyva (valószínűleg nincs benne a bázisban):"
+              tail -3 /tmp/rb.log | sed 's/^/    /'
+            fi
+          done
 
       - name: Előtte-pillanatkép (séma + sorszámok táblánként)
         run: |
@@ -179,11 +189,23 @@ jobs:
             ) x;" > /tmp/counts_before.txt
           echo "Előtte (sorszámok):" && cat /tmp/counts_before.txt
 
-      - name: A 003_multitenant.sql alkalmazása (ennek a PR-nak/branch-nek a verziója)
-        run: psql "$DB_URL" -v ON_ERROR_STOP=1 -f db/migrations/003_multitenant.sql
+      - name: MINDEN migráció alkalmazása sorrendben (ennek a PR-nak/branch-nek a verziója)
+        run: |
+          set -euo pipefail
+          for f in db/migrations/*.sql; do
+            echo "Alkalmazás: $f"
+            psql "$DB_URL" -v ON_ERROR_STOP=1 -f "$f"
+          done
 
-      - name: A rollback alkalmazása
-        run: psql "$DB_URL" -v ON_ERROR_STOP=1 -f db/migrations/rollback/003_multitenant_rollback.sql
+      - name: MINDEN rollback alkalmazása fordított sorrendben
+        # Itt már NEM tűrünk hibát: ezek a migrációk ebben a körben lettek
+        # alkalmazva, tehát mindegyik rollbacknek le KELL futnia.
+        run: |
+          set -euo pipefail
+          for f in $(ls -1 db/migrations/rollback/*.sql | sort -r); do
+            echo "Visszaállítás: $f"
+            psql "$DB_URL" -v ON_ERROR_STOP=1 -f "$f"
+          done
 
       - name: Utána-pillanatkép + összehasonlítás
         run: |
@@ -214,10 +236,10 @@ jobs:
           diff -u /tmp/counts_before.txt /tmp/counts_after.txt || { echo "::error::Eltérő sorszám a rollback után – ADATVESZTÉS a migráció+visszaállítás körben."; FAIL=1; }
 
           if [ "$FAIL" = "1" ]; then
-            echo "A 003_multitenant.sql + a hozzá tartozó rollback NEM állítja vissza pontosan az eredeti állapotot."
+            echo "A migrációk + a hozzájuk tartozó rollbackek NEM állítják vissza pontosan az eredeti állapotot."
             exit 1
           fi
-          echo "OK: a migráció + rollback kör után a séma és minden tábla sorszáma pontosan egyezik a migráció előttivel."
+          echo "OK: minden migráció + rollback kör után a séma és minden tábla sorszáma pontosan egyezik a migráció előttivel."
 
       - name: Supabase stack leállítása
         if: always()
