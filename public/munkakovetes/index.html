@@ -157,6 +157,13 @@ button{cursor:pointer}
 .pcell:hover .cell-add,.cell-add:focus-visible{opacity:1}
 @media (hover:none){.chip-x,.cell-add{opacity:1}}
 
+/* ===== Lejárt licenc: csak olvasható mód ===== */
+/* Szándékosan NEM andon-szín (--go/--wait/--stop): azok kizárólag a dolgozó
+   munkaállapotát jelölik, egy előfizetési figyelmeztetés nem az. */
+.license-banner{margin:0 0 16px;padding:12px 14px;border-radius:10px;border:1px solid #8d6b2f;
+  background:rgba(141,107,47,.18);color:var(--chalk);line-height:1.5;max-width:100ch}
+.license-banner strong{color:#e0b661}
+
 /* ===== Törzsadatok ===== */
 .subtabs{display:flex;gap:2px;margin-bottom:16px;border-bottom:1px solid var(--line);overflow-x:auto}
 .subtabs button{border:0;border-bottom:3px solid transparent;background:transparent;padding:10px 14px;color:var(--muted);font-weight:600;white-space:nowrap}
@@ -612,11 +619,64 @@ function createDemoAdapter() {
     return term;
   };
 
+  // Demó felhasználók és cégek – memóriában, ugyanazzal a felülettel, mint élesben.
+  const demoCompany = { id: 'demo-company', name: 'Demó Kft', license_expires_at: null, active: true };
+  const demoLicenseOk = () =>
+    demoCompany.active && (!demoCompany.license_expires_at || new Date(demoCompany.license_expires_at) >= new Date());
+  const demoUsers = [
+    { user_id: 'u-demo', role: 'owner', username: 'demo', contact_email: 'demo@example.com', created_at: new Date().toISOString() },
+  ];
+  const demoCompanies = [{ ...demoCompany, login_domain: 'demo.local', created_at: new Date().toISOString(), users: [{ username: 'demo', role: 'owner' }] }];
+
   return {
     mode: 'demo',
     async getSession() { return { user: { email: 'demo' } }; },
     async signIn() {},
     async signOut() {},
+    async me() {
+      return {
+        user_id: 'u-demo', company_id: demoCompany.id, role: 'owner', username: 'demo',
+        contact_email: 'demo@example.com', company: { ...demoCompany },
+        write_allowed: demoLicenseOk(),
+        platform_admin: true,   // demóban látszik a rendszergazda-nézet is, hogy kipróbálható legyen
+      };
+    },
+    async refreshMe() { return this.me(); },
+    async listUsers() { return demoUsers.map(u => ({ ...u })); },
+    async setUserRole(userId, role) {
+      if (userId === 'u-demo') throw new Error('Nem sikerült módosítani (csak tulajdonos módosíthat, és saját magát nem).');
+      const u = demoUsers.find(x => x.user_id === userId);
+      if (u) u.role = role;
+    },
+    async createUser({ username, role, contact_email }) {
+      if (demoUsers.some(u => u.username === username)) throw new Error('Ez a felhasználónév már foglalt.');
+      demoUsers.push({ user_id: uid(), role: role || 'office', username, contact_email: contact_email || null, created_at: new Date().toISOString() });
+      return { ok: true };
+    },
+    async deleteUser(userId) {
+      if (userId === 'u-demo') throw new Error('Saját magadat nem törölheted.');
+      const i = demoUsers.findIndex(u => u.user_id === userId);
+      if (i >= 0) demoUsers.splice(i, 1);
+      return { ok: true };
+    },
+    async listCompanies() { return demoCompanies.map(c => ({ ...c })); },
+    async createCompany({ name, license_expires_at, username }) {
+      demoCompanies.push({
+        id: uid(), name, login_domain: (name || 'ceg').toLowerCase().replace(/[^a-z0-9]+/g, '-') + '.local',
+        license_expires_at: license_expires_at || null, active: true,
+        created_at: new Date().toISOString(), users: [{ username, role: 'owner' }],
+      });
+      return { ok: true };
+    },
+    async updateLicense({ company_id, license_expires_at, active }) {
+      const c = demoCompanies.find(x => x.id === company_id);
+      if (c) {
+        if (license_expires_at !== undefined) c.license_expires_at = license_expires_at || null;
+        if (active !== undefined) c.active = active;
+        if (c.id === demoCompany.id) { demoCompany.license_expires_at = c.license_expires_at; demoCompany.active = c.active; }
+      }
+      return { ok: true };
+    },
     async loadMaster() {
       return clone({
         teams: db.teams, locations: db.locations, tasks: db.tasks, terminals: db.terminals,
@@ -624,6 +684,7 @@ function createDemoAdapter() {
       });
     },
     async save(table, row) {
+      if (!demoLicenseOk()) throw new Error('Lejárt előfizetés: az adatok módosítása nem lehetséges. Keresse az irodát.');
       const data = pickFields(table, row);
       let res;
       if (row.id) { res = db[table].find(r => r.id === row.id); Object.assign(res, data); }
@@ -746,7 +807,11 @@ function createDemoAdapter() {
     },
     async terminalCatalog(terminalId) {
       const term = checkTerminal(terminalId);
-      return clone({ terminal: { id: term.id, name: term.name, location_id: term.location_id }, locations: db.locations, tasks: db.tasks });
+      return clone({
+        terminal: { id: term.id, name: term.name, location_id: term.location_id },
+        license_ok: demoLicenseOk(),
+        locations: db.locations, tasks: db.tasks,
+      });
     },
     async terminalIdentify(terminalId, pin) {
       checkTerminal(terminalId);
@@ -765,6 +830,7 @@ function createDemoAdapter() {
       });
     },
     async terminalEvent(terminalId, pin, p) {
+      if (!demoLicenseOk()) throw new Error('Lejárt előfizetés: keresse az irodát.');
       checkTerminal(terminalId);
       const emp = empByPin(pin);
       if (!emp) throw new Error('Hibás PIN.');
@@ -935,11 +1001,55 @@ async function createSupabaseAdapter() {
   // felhasználó. Egyszer kérdezzük le, munkamenetenként gyorsítótárazva.
   let companyIdCache = null;
   const getCompanyId = async () => {
-    if (!companyIdCache) companyIdCache = (await q(sb.from(T('profiles')).select('company_id').single())).company_id;
+    if (!companyIdCache) companyIdCache = (await loadMe()).company_id;
     return companyIdCache;
+  };
+  let meCache = null;
+  const loadMe = async () => {
+    if (meCache) return meCache;
+    const profile = await q(sb.from(T('profiles')).select('user_id,company_id,role,username,contact_email').single());
+    // A cég sorát az RLS eleve a sajátjára szűri; a write_allowed/platform_admin
+    // a DB-ből jön, nem a kliens dönti el (a felület csak megjeleníti).
+    const [company, writeAllowed, platformAdmin] = await Promise.all([
+      q(sb.from(T('companies')).select('id,name,license_expires_at,active').single()),
+      q(sb.rpc('mk_write_allowed')),
+      q(sb.rpc('mk_is_platform_admin')),
+    ]);
+    meCache = { ...profile, company, write_allowed: writeAllowed === true, platform_admin: platformAdmin === true };
+    return meCache;
+  };
+  // A service role-os végpontok a saját hozzáférési tokenünkkel hívódnak – a
+  // szerver abból azonosítja a hívót, nem a kérés törzséből.
+  const callApi = async (path, payload) => {
+    const { data } = await sb.auth.getSession();
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${data && data.session ? data.session.access_token : ''}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    const out = await res.json().catch(() => null);
+    if (!res.ok) throw new Error((out && out.error) || 'A művelet nem sikerült.');
+    return out;
   };
   return {
     mode: 'live',
+    async me() { return loadMe(); },
+    async refreshMe() { meCache = null; return loadMe(); },
+    async listUsers() {
+      return q(sb.from(T('profiles')).select('user_id,role,username,contact_email,created_at').order('username'));
+    },
+    async setUserRole(userId, role) {
+      const rows = await q(sb.from(T('profiles')).update({ role }).eq('user_id', userId).select());
+      if (!rows || !rows.length) throw new Error('Nem sikerült módosítani (csak tulajdonos módosíthat, és saját magát nem).');
+    },
+    async createUser(payload) { return callApi('/api/mk-users', { action: 'create', ...payload }); },
+    async deleteUser(userId) { return callApi('/api/mk-users', { action: 'delete', user_id: userId }); },
+    async listCompanies() { return (await callApi('/api/mk-admin', { action: 'list_companies' })).companies; },
+    async createCompany(payload) { return callApi('/api/mk-admin', { action: 'create_company', ...payload }); },
+    async updateLicense(payload) { return callApi('/api/mk-admin', { action: 'update_license', ...payload }); },
     async getSession() { const { data } = await sb.auth.getSession(); return data.session; },
     async signIn(email, password) {
       const { error } = await sb.auth.signInWithPassword({ email, password });
@@ -1070,6 +1180,9 @@ const S = {
   live: { date: todayKey(), group: 'location', events: [], assignments: [], open: new Set() },
   plan: { monday: ymd(mondayOf(new Date())), assignments: [] },
   admin: { tab: 'employees' },
+  me: null,                    // profil + cég + licenc-állapot (lásd api.me())
+  users: [],                   // a cég felhasználói (Törzsadatok → Felhasználók)
+  companies: [],               // rendszergazda-nézet: az összes cég
   reports: (() => {
     const [from, to] = periodRangeYmd('thisWeek');
     return { period: 'thisWeek', from, to, team: '', loc: '', emp: '', tab: 'attendance', data: null, loading: false, error: null };
@@ -1085,11 +1198,33 @@ const reloadMaster = async () => { S.master = await S.api.loadMaster(); };
 const errorBox = e => `<div class="empty"><p>Hiba történt: ${esc(e && e.message || e)}</p><button class="btn" data-act="retry">Újrapróbálás</button></div>`;
 
 /* ---------- Keret és navigáció ---------- */
-const VIEWS = ['live', 'plan', 'admin', 'reports', 'terminal'];
+const VIEWS = ['live', 'plan', 'admin', 'reports', 'terminal', 'companies'];
+
+/* Írható-e most bármi. A DB is kikényszeríti (lásd 004 migráció) – ez itt csak
+   azért van, hogy a felület ne engedjen olyan gombot megnyomni, ami úgyis
+   elbukna, és hogy legyen érthető magyarázat a banneren. */
+const canWrite = () => !S.me || S.me.write_allowed !== false;
+const isOwner = () => !S.me || S.me.role === 'owner';
+const isPlatformAdmin = () => Boolean(S.me && S.me.platform_admin);
+
+function licenseNotice() {
+  if (!S.me || S.me.write_allowed !== false) return '';
+  const c = S.me.company || {};
+  const when = c.license_expires_at ? fmtDateLong(new Date(c.license_expires_at)) : null;
+  const why = c.active === false
+    ? 'Az előfizetés fel van függesztve.'
+    : (when ? `Az előfizetés lejárt (${when}).` : 'Az előfizetés lejárt.');
+  return `<div class="license-banner" role="status">
+    <strong>Csak olvasható mód.</strong> ${esc(why)}
+    Minden adat látható és a riportok letölthetők, de új adat rögzítése és módosítása nem lehetséges.
+    A tableteken a dolgozók sem tudnak munkát rögzíteni. Keresse a rendszergazdát az előfizetés megújításáért.
+  </div>`;
+}
 
 function renderShell() {
   const bar = $('#bar');
   bar.hidden = false;
+  const roleLabel = S.me ? (S.me.role === 'owner' ? 'tulajdonos' : 'irodai') : '';
   bar.innerHTML = `
     <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Munkakövetés</span></div>
     <nav class="tabs" aria-label="Fő menü">
@@ -1098,10 +1233,11 @@ function renderShell() {
       <a href="#admin" data-nav="admin">Törzsadatok</a>
       <a href="#reports" data-nav="reports">Riportok</a>
       <a href="#terminal" data-nav="terminal">Tablet</a>
+      ${isPlatformAdmin() ? '<a href="#companies" data-nav="companies">Cégek</a>' : ''}
     </nav>
     <div class="bar-end">${S.api.mode === 'demo'
       ? '<span class="mode" title="Az adatok csak ebben a böngészőben élnek, újratöltéskor visszaállnak.">Demó adatok</span>'
-      : `<span class="muted small">${esc(loginDisplayName(S.session && S.session.user && S.session.user.email || ''))}</span><button class="btn small ghost" data-bar="logout">Kilépés</button>`}</div>`;
+      : `<span class="muted small">${esc(loginDisplayName(S.session && S.session.user && S.session.user.email || ''))}${roleLabel ? ' · ' + roleLabel : ''}</span><button class="btn small ghost" data-bar="logout">Kilépés</button>`}</div>`;
   bar.onclick = async ev => {
     if (ev.target.closest('[data-bar="logout"]')) { await S.api.signOut(); location.reload(); }
   };
@@ -1109,6 +1245,7 @@ function renderShell() {
 
 async function go(view) {
   if (!VIEWS.includes(view)) view = 'live';
+  if (view === 'companies' && !isPlatformAdmin()) view = 'live';
   S.view = view;
   $$('#bar [data-nav]').forEach(a => a.setAttribute('aria-current', a.dataset.nav === view ? 'page' : 'false'));
   stopTerminalTimers();
@@ -1118,8 +1255,9 @@ async function go(view) {
   try {
     if (view === 'live') { await loadLive(); renderLive(); }
     else if (view === 'plan') { await loadPlan(); renderPlan(); }
-    else if (view === 'admin') renderAdmin();
+    else if (view === 'admin') { await loadUsersIfNeeded(); renderAdmin(); }
     else if (view === 'reports') { await loadReports(); renderReports(); }
+    else if (view === 'companies') { S.companies = await S.api.listCompanies(); renderCompanies(); }
     else await renderTerminalTab();
   } catch (e) { v.innerHTML = errorBox(e); }
 }
@@ -1361,8 +1499,9 @@ function renderPlan() {
         <button class="btn icon" data-act="plan-next" aria-label="Következő hét">›</button>
       </div>
       <h1 class="view-title">${esc(label)}</h1>
-      <button class="btn" data-act="plan-copy">Előző hét másolása</button>
+      <button class="btn" data-act="plan-copy"${canWrite() ? '' : ' disabled'}>Előző hét másolása</button>
     </div>
+    ${licenseNotice()}
     ${emps.length === 0 ? '<div class="empty"><p>Még nincs dolgozó felvéve.</p><a class="btn btn-primary" href="#admin">Dolgozók felvétele</a></div>' : `
     <div class="pgrid-wrap"><div class="pgrid" style="--days:${days.length}">
       <div class="phead pcorner">Dolgozó</div>
@@ -1552,13 +1691,24 @@ async function copyPrevWeek() {
 }
 
 /* ---------- TÖRZSADATOK ---------- */
-const ADMIN_TABS = [['employees', 'Dolgozók'], ['tasks', 'Feladatok'], ['locations', 'Helyszínek'], ['teams', 'Csapatok'], ['terminals', 'Tabletek']];
+const BASE_ADMIN_TABS = [['employees', 'Dolgozók'], ['tasks', 'Feladatok'], ['locations', 'Helyszínek'], ['teams', 'Csapatok'], ['terminals', 'Tabletek']];
+// A Felhasználók fül csak tulajdonosnak jelenik meg. Ez UX-szűrés, nem védelmi
+// határ: a tényleges tiltás az RLS-ben és a szerveroldali végponton van (egy
+// irodai szerepkörű felhasználó akkor sem tudna felvenni senkit, ha idelátna).
+const adminTabs = () => isOwner() ? BASE_ADMIN_TABS.concat([['users', 'Felhasználók']]) : BASE_ADMIN_TABS;
+
+async function loadUsersIfNeeded() {
+  if (S.admin.tab === 'users' && isOwner()) S.users = await S.api.listUsers();
+}
 
 function renderAdmin() {
+  const tabs = adminTabs();
+  if (!tabs.some(([k]) => k === S.admin.tab)) S.admin.tab = 'employees';
   const tab = S.admin.tab;
   $('#view').innerHTML = `<section class="admin">
     <div class="toolbar"><h1 class="view-title">Törzsadatok</h1></div>
-    <div class="subtabs" role="tablist">${ADMIN_TABS.map(([k, l]) => `<button role="tab" aria-selected="${k === tab}" data-act="admin-tab" data-v="${k}">${l}</button>`).join('')}</div>
+    ${licenseNotice()}
+    <div class="subtabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" aria-selected="${k === tab}" data-act="admin-tab" data-v="${k}">${l}</button>`).join('')}</div>
     <div class="admin-body">${ADMIN_RENDER[tab]()}</div>
   </section>`;
 }
@@ -1610,7 +1760,133 @@ const ADMIN_RENDER = {
       </tr>`; }).join('')}
       </tbody></table></div>`;
   },
+  users() {
+    const meId = S.me && S.me.user_id;
+    return `<div class="admin-head"><p class="muted">Kik léphetnek be az irodai felületre ennél a cégnél. A <b>tulajdonos</b> mindent kezelhet, beleértve a felhasználókat; az <b>irodai</b> szerepkör ugyanazt tudja, csak felhasználókat nem vehet fel és nem törölhet. Saját magadat nem tudod átminősíteni vagy törölni – ez szándékos, így nem lehet véletlenül kizárni az utolsó tulajdonost.</p>
+      <button class="btn btn-primary" data-act="user-new">Új felhasználó</button></div>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Felhasználónév</th><th>Szerepkör</th><th>E-mail (értesítéshez)</th><th></th></tr></thead><tbody>
+      ${S.users.map(u => {
+        const self = u.user_id === meId;
+        return `<tr>
+          <td>${esc(u.username || '–')}${self ? ' <span class="tag">te</span>' : ''}</td>
+          <td>${u.role === 'owner' ? 'tulajdonos' : 'irodai'}</td>
+          <td>${esc(u.contact_email || '–')}</td>
+          <td class="actions">${self ? '<span class="muted small">saját fiók</span>' : `
+            <button class="btn small" data-act="user-role" data-id="${u.user_id}" data-v="${u.role === 'owner' ? 'office' : 'owner'}">${u.role === 'owner' ? 'Legyen irodai' : 'Legyen tulajdonos'}</button>
+            <button class="btn small ghost" data-act="user-del" data-id="${u.user_id}" data-name="${esc(u.username || '')}">Törlés</button>`}</td>
+        </tr>`;
+      }).join('')}
+      </tbody></table></div>
+      ${S.users.length ? '' : '<p class="muted">Még nincs felvéve felhasználó.</p>'}`;
+  },
 };
+
+/* ---------- Felhasználó- és cég-űrlapok ---------- */
+function userModal() {
+  openModal({
+    title: 'Új felhasználó',
+    body: `<label class="field"><span>Felhasználónév</span><input id="f-user" maxlength="40" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="pl. anna"></label>
+      <label class="field"><span>Jelszó</span><input id="f-pass" type="password" autocomplete="new-password" placeholder="legalább 12 karakter, betű és szám"></label>
+      <label class="field"><span>Szerepkör</span><select id="f-role"><option value="office">irodai</option><option value="owner">tulajdonos</option></select></label>
+      <label class="field"><span>E-mail cím (valódi, értesítéshez)</span><input id="f-mail" type="email" placeholder="pl. anna@ceg.hu"></label>
+      <p class="muted small">Az e-mail cím nem a bejelentkezéshez kell – az továbbra is a felhasználónévvel megy. Azért kérjük, hogy később, a kétlépcsős azonosítás bevezetésekor legyen hova kódot küldeni, ha valaki elveszti a telefonját.</p>`,
+    actions: [{ label: 'Mégse' }, {
+      label: 'Felvétel', primary: true, onClick: async modal => {
+        const username = $('#f-user', modal).value.trim();
+        const password = $('#f-pass', modal).value;
+        if (!username) throw new Error('Add meg a felhasználónevet.');
+        if (password.length < 12) throw new Error('A jelszó legyen legalább 12 karakter.');
+        await S.api.createUser({
+          username, password,
+          role: $('#f-role', modal).value,
+          contact_email: $('#f-mail', modal).value.trim(),
+        });
+        S.users = await S.api.listUsers();
+        renderAdmin();
+        toast('Felhasználó felvéve');
+      },
+    }],
+  });
+}
+
+function companyModal() {
+  openModal({
+    title: 'Új cég',
+    body: `<label class="field"><span>Cégnév</span><input id="f-cname" maxlength="80" placeholder="pl. Kovács Kft"></label>
+      <label class="field"><span>Licenc lejárata</span><input id="f-exp" type="date"></label>
+      <label class="field"><span>Első felhasználó neve</span><input id="f-user" maxlength="40" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="pl. iroda"></label>
+      <label class="field"><span>Jelszava</span><input id="f-pass" type="password" autocomplete="new-password" placeholder="legalább 12 karakter, betű és szám"></label>
+      <label class="field"><span>E-mail cím (valódi, értesítéshez)</span><input id="f-mail" type="email"></label>
+      <label class="check"><input type="checkbox" id="f-sample"> Példa törzsadatok betöltése (csapatok, helyszínek, feladatok, tabletek – utólag átnevezhetők)</label>
+      <p class="muted small">Az első felhasználó tulajdonosi jogot kap, és ő veheti fel a cég többi kollégáját. A bejelentkezési domaint a cégnévből képezzük.</p>`,
+    actions: [{ label: 'Mégse' }, {
+      label: 'Létrehozás', primary: true, onClick: async modal => {
+        const name = $('#f-cname', modal).value.trim();
+        const username = $('#f-user', modal).value.trim();
+        const password = $('#f-pass', modal).value;
+        if (!name) throw new Error('Add meg a cég nevét.');
+        if (!username) throw new Error('Add meg az első felhasználó nevét.');
+        if (password.length < 12) throw new Error('A jelszó legyen legalább 12 karakter.');
+        const exp = $('#f-exp', modal).value;
+        await S.api.createCompany({
+          name, username, password,
+          license_expires_at: exp ? new Date(exp + 'T23:59:59').toISOString() : null,
+          contact_email: $('#f-mail', modal).value.trim(),
+          sample_data: $('#f-sample', modal).checked,
+        });
+        S.companies = await S.api.listCompanies();
+        renderCompanies();
+        toast('Cég létrehozva');
+      },
+    }],
+  });
+}
+
+function licenseModal(companyId) {
+  const c = S.companies.find(x => x.id === companyId);
+  if (!c) return;
+  const current = c.license_expires_at ? new Date(c.license_expires_at).toISOString().slice(0, 10) : '';
+  openModal({
+    title: `Licenc – ${c.name}`,
+    body: `<label class="field"><span>Lejárat</span><input id="f-exp" type="date" value="${esc(current)}"></label>
+      <label class="check"><input type="checkbox" id="f-active" ${c.active === false ? '' : 'checked'}> Aktív előfizetés</label>
+      <p class="muted small">A kikapcsolás a dátumtól függetlenül azonnal csak olvasható módba teszi a céget: az iroda mindent lát és riportot tölt le, de nem rögzít, a tableteken pedig a dolgozók nem tudnak munkát jelezni.</p>`,
+    actions: [{ label: 'Mégse' }, {
+      label: 'Mentés', primary: true, onClick: async modal => {
+        const exp = $('#f-exp', modal).value;
+        await S.api.updateLicense({
+          company_id: companyId,
+          license_expires_at: exp ? new Date(exp + 'T23:59:59').toISOString() : null,
+          active: $('#f-active', modal).checked,
+        });
+        S.companies = await S.api.listCompanies();
+        if (S.me && S.me.company_id === companyId) S.me = await S.api.refreshMe();
+        renderCompanies();
+        toast('Licenc mentve');
+      },
+    }],
+  });
+}
+
+/* ---------- CÉGEK (csak rendszergazdának) ---------- */
+function renderCompanies() {
+  $('#view').innerHTML = `<section class="admin">
+    <div class="toolbar"><h1 class="view-title">Cégek</h1></div>
+    <div class="admin-head"><p class="muted">Rendszergazda-nézet: az összes ügyfélcég és a licencük. A cégek napi adatait (dolgozók, munkaidő, riportok) ez a nézet szándékosan nem mutatja – a rendszergazdának nincs rálátása egy cég üzleti adataira.</p>
+      <button class="btn btn-primary" data-act="company-new">Új cég</button></div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Cég</th><th>Bejelentkezési domain</th><th>Felhasználók</th><th>Licenc</th><th></th></tr></thead><tbody>
+    ${S.companies.map(c => {
+      const expired = c.active === false || (c.license_expires_at && new Date(c.license_expires_at) < new Date());
+      return `<tr class="${expired ? 'is-off' : ''}">
+        <td>${esc(c.name)}</td>
+        <td><code class="small">${esc(c.login_domain || '–')}</code></td>
+        <td>${(c.users || []).map(u => esc(u.username || '?') + (u.role === 'owner' ? ' (tul.)' : '')).join(', ') || '–'}</td>
+        <td>${c.active === false ? '<span class="tag">felfüggesztve</span> ' : ''}${c.license_expires_at ? esc(fmtDateLong(new Date(c.license_expires_at))) + (expired && c.active !== false ? ' <span class="tag">lejárt</span>' : '') : 'nincs lejárat'}</td>
+        <td class="actions"><button class="btn small" data-act="company-license" data-id="${c.id}">Licenc</button></td>
+      </tr>`;
+    }).join('')}
+    </tbody></table></div>`;
+}
 
 function simpleList(table, newLabel, hint) {
   const list = [...S.master[table]].sort(bySortName);
@@ -2268,6 +2544,17 @@ const keypad = (digit, clear, back) => `<div class="keypad">${['1', '2', '3', '4
 
 function termPin() {
   const t = S.term;
+  // Lejárt/felfüggesztett előfizetésnél a PIN képernyő helyett tájékoztatás. A
+  // tényleges védelem nem ez: az esemény-rögzítés a szerveren is elbukik (lásd
+  // 004 migráció, mk_terminal_event) – ez csak azért van, hogy a dolgozó ne
+  // kezdjen el hiába PIN-t nyomkodni.
+  if (t.cat && t.cat.license_ok === false) {
+    return `<div class="term-fatal">
+      <h1 class="t-h1">Lejárt előfizetés</h1>
+      <p class="t-lead">Ezen a tableten most nem lehet munkát rögzíteni.</p>
+      <p class="muted">Keresse az irodát. A korábbi adatok nem vesztek el.</p>
+    </div>`;
+  }
   const dots = Array.from({ length: CONFIG.PIN_LENGTH }, (_, i) => `<span class="${i < t.pin.length ? 'on' : ''}"></span>`).join('');
   return `<div class="pin-screen">
     <div class="pin-left">
@@ -2798,7 +3085,11 @@ const ACTIONS = {
     await reloadPlan();
   },
   'assign-edit': el => openAssignmentModal({ mode: 'edit', assignmentId: el.dataset.id }),
-  'admin-tab': el => { S.admin.tab = el.dataset.v; renderAdmin(); },
+  'admin-tab': async el => {
+    S.admin.tab = el.dataset.v;
+    await loadUsersIfNeeded();          // a Felhasználók fül adata csak itt derül ki
+    renderAdmin();
+  },
   'emp-new': () => employeeModal(null),
   'emp-edit': el => employeeModal(el.dataset.id),
   'emp-pin': el => pinModal(el.dataset.id),
@@ -2816,6 +3107,28 @@ const ACTIONS = {
   'term-toggle': el => toggleActive('terminals', el.dataset.id),
   'term-del': el => removeRowModal('terminals', el.dataset.id),
   'term-copy': el => copyText(el.dataset.url),
+  'user-new': () => userModal(),
+  'user-role': async el => {
+    await S.api.setUserRole(el.dataset.id, el.dataset.v);
+    S.users = await S.api.listUsers();
+    renderAdmin();
+    toast('Szerepkör módosítva');
+  },
+  'user-del': el => openModal({
+    title: 'Felhasználó törlése',
+    body: `<p>Biztosan törlöd: <b>${esc(el.dataset.name || 'ez a felhasználó')}</b>?</p>
+      <p class="muted">A bejelentkezési fiókja is megszűnik, többé nem tud belépni. A korábbi munkája (beosztások, események) érintetlen marad, mert azok a dolgozókhoz tartoznak, nem az irodai fiókokhoz.</p>`,
+    actions: [{ label: 'Mégse' }, {
+      label: 'Törlés', danger: true, onClick: async () => {
+        await S.api.deleteUser(el.dataset.id);
+        S.users = await S.api.listUsers();
+        renderAdmin();
+        toast('Felhasználó törölve');
+      },
+    }],
+  }),
+  'company-new': () => companyModal(),
+  'company-license': el => licenseModal(el.dataset.id),
   'rep-tab': el => { S.reports.tab = el.dataset.v; renderReports(); },
   'rep-print': () => window.print(),
   'rep-excel': () => exportReportsExcel(),
@@ -2909,6 +3222,9 @@ function onRemoteChange(what) {
 
 /* ---------- Indítás ---------- */
 async function afterLogin() {
+  // A profil/licenc állapotot a keret kirajzolása ELŐTT kell tudni: ebből dől el,
+  // látszik-e a Cégek fül, a Felhasználók fül, és kell-e csak-olvasható banner.
+  try { S.me = await S.api.me(); } catch { S.me = null; }
   await reloadMaster();
   S.api.subscribe(onRemoteChange);
   renderShell();

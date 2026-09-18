@@ -138,4 +138,15 @@ export const TENANT_RPCS = [
       return !leaksA && hasOwnB;
     },
   },
+  {
+    // 004: a licenc-állapot lekérdezése egy TETSZŐLEGES cégre. A függvényről
+    // szándékosan vissza van vonva a végrehajtási jog (revoke execute), mert
+    // egy idegen cég azonosítójával hívva elárulná, hogy az a cég aktív-e.
+    // A saját cégére a kliens a paraméter nélküli mk_write_allowed()-ot hívja.
+    name: 'mk_company_active',
+    baseArgs: () => ({}),
+    crossTenantArg: 'p_company',
+    otherTenantValue: (companyB) => companyB.id,
+    expect: 'error',
+  },
 ];
