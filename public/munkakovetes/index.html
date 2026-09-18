@@ -1007,15 +1007,35 @@ async function createSupabaseAdapter() {
   let meCache = null;
   const loadMe = async () => {
     if (meCache) return meCache;
-    const profile = await q(sb.from(T('profiles')).select('user_id,company_id,role,username,contact_email').single());
-    // A cég sorát az RLS eleve a sajátjára szűri; a write_allowed/platform_admin
-    // a DB-ből jön, nem a kliens dönti el (a felület csak megjeleníti).
-    const [company, writeAllowed, platformAdmin] = await Promise.all([
-      q(sb.from(T('companies')).select('id,name,license_expires_at,active').single()),
+    const { data: userData } = await sb.auth.getUser();
+    const uid = userData && userData.user ? userData.user.id : null;
+    if (!uid) throw new Error('Nincs bejelentkezett felhasználó.');
+
+    // FONTOS: a saját profilt a user_id-re SZŰRVE kell kérni. Az mk_profiles
+    // RLS policy-ja a cég ÖSSZES profilját visszaadja (ebből áll elő a
+    // Felhasználók lista), tehát szűrés nélkül a .single() a második
+    // felhasználótól kezdve elbukna: "Cannot coerce the result to a single
+    // JSON object". Egycéges, egyfelhasználós rendszerben ez évekig
+    // észrevétlen maradna – lásd a kereszt-teszt erre írt próbáját.
+    // maybeSingle(), mert egy tiszta platform adminnak SZÁNDÉKOSAN nincs
+    // cégprofilja (lásd CLAUDE.md "Szerepkörök").
+    const [profile, company, writeAllowed, platformAdmin] = await Promise.all([
+      q(sb.from(T('profiles')).select('user_id,company_id,role,username,contact_email').eq('user_id', uid).maybeSingle()),
+      q(sb.from(T('companies')).select('id,name,license_expires_at,active').maybeSingle()),
       q(sb.rpc('mk_write_allowed')),
       q(sb.rpc('mk_is_platform_admin')),
     ]);
-    meCache = { ...profile, company, write_allowed: writeAllowed === true, platform_admin: platformAdmin === true };
+
+    meCache = {
+      user_id: uid,
+      company_id: profile ? profile.company_id : null,
+      role: profile ? profile.role : null,
+      username: profile ? profile.username : null,
+      contact_email: profile ? profile.contact_email : null,
+      company: company || null,
+      write_allowed: writeAllowed === true,
+      platform_admin: platformAdmin === true,
+    };
     return meCache;
   };
   // A service role-os végpontok a saját hozzáférési tokenünkkel hívódnak – a
@@ -1181,6 +1201,7 @@ const S = {
   plan: { monday: ymd(mondayOf(new Date())), assignments: [] },
   admin: { tab: 'employees' },
   me: null,                    // profil + cég + licenc-állapot (lásd api.me())
+  meError: null,               // ha a profil betöltése hibázik, NE csendben nyeljük el
   users: [],                   // a cég felhasználói (Törzsadatok → Felhasználók)
   companies: [],               // rendszergazda-nézet: az összes cég
   reports: (() => {
@@ -1208,7 +1229,15 @@ const isOwner = () => !S.me || S.me.role === 'owner';
 const isPlatformAdmin = () => Boolean(S.me && S.me.platform_admin);
 
 function licenseNotice() {
-  if (!S.me || S.me.write_allowed !== false) return '';
+  if (S.meError) {
+    return `<div class="license-banner" role="status">
+      <strong>A jogosultsági adatok betöltése nem sikerült.</strong> ${esc(S.meError)}
+      Amíg ez fennáll, a szerepkörhöz kötött részek (Felhasználók, Cégek) nem jelennek meg.
+      Töltsd újra az oldalt; ha marad, szólj a fejlesztőnek.
+    </div>`;
+  }
+  // Egy tiszta platform adminnak nincs cége – neki a licenc-banner értelmetlen.
+  if (!S.me || !S.me.company || S.me.write_allowed !== false) return '';
   const c = S.me.company || {};
   const when = c.license_expires_at ? fmtDateLong(new Date(c.license_expires_at)) : null;
   const why = c.active === false
@@ -3224,7 +3253,16 @@ function onRemoteChange(what) {
 async function afterLogin() {
   // A profil/licenc állapotot a keret kirajzolása ELŐTT kell tudni: ebből dől el,
   // látszik-e a Cégek fül, a Felhasználók fül, és kell-e csak-olvasható banner.
-  try { S.me = await S.api.me(); } catch { S.me = null; }
+  // Hibát NEM nyelünk el csendben: egy néma S.me = null pont azt rejtené el,
+  // hogy a jogosultsági rész nem működik (a szerepkörös fülek egyszerűen
+  // eltűnnének, magyarázat nélkül) – ez egy valódi hibánál meg is történt.
+  try {
+    S.me = await S.api.me();
+    S.meError = null;
+  } catch (e) {
+    S.me = null;
+    S.meError = (e && e.message) || String(e);
+  }
   await reloadMaster();
   S.api.subscribe(onRemoteChange);
   renderShell();

@@ -23,6 +23,7 @@
 //      bármelyik átmegy, BUKÁS.
 
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { TENANT_TABLES, TENANT_RPCS } from './manifest.mjs';
 
 function fail(message) {
@@ -151,6 +152,38 @@ if (schemaProblems.length) {
       '(vagy elgépelt a tábla/oszlopnév a manifestben):\n - ' +
       schemaProblems.join('\n - ')
   );
+}
+
+// --- 5b. forrás-ellenőrzés: a kliens a SAJÁT profilját user_id-re szűrve kérje ---
+//
+// Egy valódi éles hiba miatt van itt (2026. szeptember 18.): a loadMe() szűrés
+// nélkül hívott .single()-t az mk_profiles-on. Az RLS a cég ÖSSZES profilját
+// visszaadja, tehát a második felhasználó felvételétől kezdve a lekérdezés
+// elbukott ("Cannot coerce the result to a single JSON object"), és vele a
+// licenc-mentés, a szerepkörös fülek és a rajzfeltöltés is. Egycéges,
+// egyfelhasználós rendszerben ez sosem derül ki magától – ezért forrásból
+// ellenőrizzük, nem csak viselkedésből.
+{
+  const clientSource = readFileSync(new URL('../../public/munkakovetes/index.html', import.meta.url), 'utf8');
+  const profileSelects = clientSource
+    .split('\n')
+    .filter((line) => /T\('profiles'\)\)\.select\(/.test(line));
+
+  if (!profileSelects.length) {
+    fail('Nem találom a kliensben az mk_profiles lekérdezést – változott a kód szerkezete, nézd át ezt az ellenőrzést.');
+  }
+  const bad = profileSelects.filter(
+    (line) => /\.(single|maybeSingle)\(/.test(line) && !/\.eq\('user_id'/.test(line)
+  );
+  if (bad.length) {
+    fail(
+      'A kliens egyetlen sorra szűkítve (.single()/.maybeSingle()) kérdezi le az\n' +
+        'mk_profiles táblát, DE nem szűr user_id-re. Az RLS a cég összes profilját\n' +
+        'visszaadja, tehát ez a második felhasználótól kezdve elbukik:\n - ' +
+        bad.map((l) => l.trim()).join('\n - ') +
+        '\n\nTegyél .eq(\'user_id\', <bejelentkezett user id>) szűrést a lekérdezésre.'
+    );
+  }
 }
 
 // --- 6. a tényleges kereszt-bérlős próba: két próba-cég + felhasználó, ---
@@ -313,6 +346,69 @@ async function runPrivilegeProbes(admin, clientA, companyA, companyB, userA, lea
   if (!expiredEvent) leaks.push('licenc: lejárt előfizetéssel a tablet MÉGIS tudott eseményt rögzíteni');
 
   // Visszaállítás, hogy a további próbák ne egy lejárt cégen fussanak.
+  await admin.from('mk_companies').update({ license_expires_at: null }).eq('id', companyA.id);
+
+  // 5) TÖBB FELHASZNÁLÓS CÉG – ez a 2026. szeptember 18-i éles hiba regressziós
+  //    próbája. A kliens a bejelentkezés után lekéri a saját profilját; ha ezt
+  //    NEM szűri user_id-re, az RLS a cég összes profilját visszaadja, és egy
+  //    .single() a MÁSODIK felhasználótól kezdve elbukik. Élesben ez a
+  //    licenc-mentést, a szerepkörös füleket és a rajzfeltöltést is megölte.
+  const colleague = await createTestUser(admin, companyA.id, 'office');
+
+  const { data: allProfiles } = await clientA.from('mk_profiles').select('user_id');
+  if ((allProfiles?.length ?? 0) < 2) {
+    leaks.push(
+      `több felhasználós próba: a cégnek 2 profilja kellene legyen, de a bejelentkezett kliens ${allProfiles?.length ?? 0}-t lát ` +
+        '(a próba maga romlott el, nem a termék)'
+    );
+  }
+
+  const { data: ownProfile, error: ownProfileError } = await clientA
+    .from('mk_profiles')
+    .select('user_id,company_id,role')
+    .eq('user_id', userA.id)
+    .maybeSingle();
+  if (ownProfileError) {
+    leaks.push(`több felhasználós próba: a saját profil lekérése hibázott: ${ownProfileError.message}`);
+  } else if (!ownProfile || ownProfile.user_id !== userA.id) {
+    leaks.push('több felhasználós próba: a saját profil lekérése nem a bejelentkezett felhasználó sorát adta vissza');
+  }
+
+  const { data: ownCompany, error: ownCompanyError } = await clientA
+    .from('mk_companies')
+    .select('id,name,license_expires_at,active')
+    .maybeSingle();
+  if (ownCompanyError || !ownCompany || ownCompany.id !== companyA.id) {
+    leaks.push(
+      'több felhasználós próba: a saját cég lekérése nem egyetlen, helyes sort adott ' +
+        `(${ownCompanyError ? ownCompanyError.message : JSON.stringify(ownCompany)})`
+    );
+  }
+
+  // 6) A LICENC MENTÉSÉNEK ÚTJA. A felületen ez a rendszergazda-végponton megy,
+  //    az pedig service role-lal ír – itt ezt a DB-műveletet próbáljuk ki, és azt
+  //    is, hogy az érték tényleg megmarad. A termék egyik legfontosabb funkciója:
+  //    ha a licenc nem állítható, nem lehet ügyfelet kezelni.
+  const ujLejarat = new Date(Date.now() + 30 * 86400000).toISOString();
+  const { error: adminLicError } = await admin
+    .from('mk_companies')
+    .update({ license_expires_at: ujLejarat, active: true })
+    .eq('id', companyA.id);
+  if (adminLicError) {
+    leaks.push(`licenc-mentés: a rendszergazda útján (service role) NEM sikerült írni: ${adminLicError.message}`);
+  } else {
+    const { data: after } = await admin
+      .from('mk_companies')
+      .select('license_expires_at')
+      .eq('id', companyA.id)
+      .maybeSingle();
+    if (!after || !after.license_expires_at) {
+      leaks.push('licenc-mentés: a rendszergazda útján lefutott az írás, de az érték nem maradt meg');
+    }
+  }
+
+  // A kolléga takarítása, hogy a próba ne hagyjon maga után plusz fiókot.
+  await admin.auth.admin.deleteUser(colleague.id).catch(() => null);
   await admin.from('mk_companies').update({ license_expires_at: null }).eq('id', companyA.id);
 }
 
