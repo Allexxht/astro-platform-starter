@@ -21,6 +21,8 @@ A bevezetés ütemekben halad. Most az MVP kész, és az ötletek menet közben 
 - `scripts/migrate-storage-to-company-prefix.mjs` – Node script, ami a `mk-rajzok` Storage bucket meglévő fájljait a `<company_id>/` prefix alá mozgatja (a Storage API `move()` hívásával, nem SQL-lel) a `003_multitenant.sql` migráció után. Idempotens, van `--dry-run` kapcsolója.
 - `db/MIGRATION_RUNBOOK.md` – lépésről lépésre útmutató a `003_multitenant.sql` staging, majd éles futtatásához (éles adat másolása stagingre, ellenőrző lista, teljes mentés és visszaállítás-próba, éles lépések).
 - `db/verify-migration-before.sql` / `db/verify-migration-after.sql` – a migráció előtt/után lefuttatandó pár: a "before" elmenti a sorszámokat egy ideiglenes táblába, az "after" táblánként összeveti (adatvesztés?), ellenőrzi a `company_id` kitöltöttségét, a `mk_companies`/`mk_profiles` állapotát, és hogy a csatolmányokhoz van-e ténylegesen Storage objektum az új útvonalon – a végén egy „✅ OK” / „❌ HIÁNYOSSÁGOK” összegző sorral.
+- `UJ_UGYFEL_FORGATOKONYV.md` – végigkattintós próba-forgatókönyv egy kitalált céggel (cég létrehozása → belépés → törzsadat → beosztás rajzzal → tablet → riport → licenc → törlés), lépésenkénti időbecsléssel és az előre látott akadályokkal. Ez adja a valódi ügyfél bevezetésének időbecslését.
+- `db/proba_ceg_torles.sql` – egy próba-cég és minden adatának törlése (a felületen NINCS cégtörlés). Beépített védelem: a legelső (BREMAT) céget megtagadja. A Storage-fájlokat előtte kézzel kell törölni.
 - `db/verify-auth-profiles.sql` – bármikor futtatható ellenőrzés: minden `auth.users` sorhoz van-e `mk_profiles` bejegyzés helyes céggel/szerepkörrel (egy profil nélküli fiók be tudna lépni, de üres/hibás képernyőt kapna).
 
 ## Architektúra
