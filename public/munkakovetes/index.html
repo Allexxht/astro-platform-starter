@@ -423,9 +423,10 @@ const CONFIG = {
   SUPABASE_URL: 'https://nuufcwpbjfimykumufgi.supabase.co',
   SUPABASE_ANON_KEY: 'sb_publishable_PkHro-X1yYxPxCO_FzDo-g__OIojxJ8',
 
-  // Irodai belépés: a felhasználónévből a háttérben e-mail lesz (a Supabase Auth e-mailt kér).
-  // Pl. "Alex" -> alex@bremat.local. Aki @ jelet ír be, azt változatlanul e-mailként használjuk.
-  LOGIN_DOMAIN: 'bremat.local',
+  // Irodai belépés: e-mail cím + jelszó. Nincs kitalált domain és nincs
+  // cégválasztó: az auth.users.email globálisan egyedi, tehát a cím önmagában
+  // megmondja, melyik céghez tartozik a belépő.
+  PASSWORD_MIN: 12,
 
   PIN_LENGTH: 4,
   SHOW_SATURDAY: true,            // heti tervben hétfő–szombat
@@ -461,20 +462,15 @@ const fmtDateShort = d => d.toLocaleDateString('hu-HU', { month: 'short', day: '
 const fmtDateLong = d => d.toLocaleDateString('hu-HU', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
 const fmtDur = min => { min = Math.max(0, Math.round(min || 0)); const h = Math.floor(min / 60), m = min % 60; return h ? `${h} ó ${m} p` : `${m} p`; };
 const firstName = name => (name || '').trim().split(/\s+/).slice(-1)[0] || name;
-// Irodai belépés: felhasználónév -> e-mail. "@" jelet tartalmazó bevitelt változatlanul hagyunk.
-const loginEmail = raw => {
-  const s = String(raw == null ? '' : raw).trim();
-  if (s.includes('@')) return s;
-  const local = s.toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '')
-    .replace(/\s+/g, '.').replace(/[^a-z0-9._-]/g, '');
-  return local ? `${local}@${CONFIG.LOGIN_DOMAIN}` : s;
-};
-// Fejléc: a bejelentkezett felhasználó neve a @<LOGIN_DOMAIN> rész nélkül.
-const loginDisplayName = email => {
-  const e = String(email == null ? '' : email);
-  const suffix = '@' + CONFIG.LOGIN_DOMAIN;
-  return e.toLowerCase().endsWith(suffix.toLowerCase()) ? e.slice(0, -suffix.length) : e;
-};
+// Bejelentkezés: a beírt e-mail címet NEM alakítjuk át, csak a felesleges
+// szóközt vesszük le és kisbetűsítünk. Domaint sosem fűzünk hozzá – korábban
+// ez volt a beégetett bremat.local, ami egy másik cég felhasználóját a BREMAT
+// fiókjába vitte volna (lásd CLAUDE.md).
+const normalizeEmail = raw => String(raw == null ? '' : raw).trim().toLowerCase();
+const isEmail = v => /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/.test(normalizeEmail(v));
+// Fejléc: a megjelenítendő név, ha van; egyébként a bejelentkezési cím.
+const sessionEmail = () => (S.session && S.session.user && S.session.user.email) || '';
+const myDisplayName = () => (S.me && S.me.username) || sessionEmail();
 const sanitizeFileName = name => String(name || 'fajl').replace(/[/\\]/g, '_').trim().slice(-180) || 'fajl';
 const fmtBytes = n => { n = Number(n) || 0; return n >= 1024 * 1024 ? `${(n / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`; };
 const isPdfFile = f => /pdf/i.test((f && f.mime_type) || '') || /\.pdf$/i.test((f && f.file_name) || '');
@@ -624,19 +620,26 @@ function createDemoAdapter() {
   const demoLicenseOk = () =>
     demoCompany.active && (!demoCompany.license_expires_at || new Date(demoCompany.license_expires_at) >= new Date());
   const demoUsers = [
-    { user_id: 'u-demo', role: 'owner', username: 'demo', contact_email: 'demo@example.com', created_at: new Date().toISOString() },
+    { user_id: 'u-demo', role: 'owner', username: 'Demó Dániel', email: 'demo@example.com', contact_email: 'demo@example.com', created_at: new Date().toISOString() },
   ];
-  const demoCompanies = [{ ...demoCompany, login_domain: 'demo.local', created_at: new Date().toISOString(), users: [{ username: 'demo', role: 'owner' }] }];
+  const demoCompanies = [{
+    ...demoCompany, created_at: new Date().toISOString(),
+    users: [{ username: 'Demó Dániel', email: 'demo@example.com', role: 'owner' }],
+    employee_count: 6, event_count: 42, last_event_at: new Date().toISOString(),
+  }];
 
   return {
     mode: 'demo',
-    async getSession() { return { user: { email: 'demo' } }; },
+    async getSession() { return { user: { email: 'demo@example.com' } }; },
     async signIn() {},
     async signOut() {},
+    async requestPasswordReset() {},
+    async updatePassword() {},
+    onPasswordRecovery() {},
     async me() {
       return {
-        user_id: 'u-demo', company_id: demoCompany.id, role: 'owner', username: 'demo',
-        contact_email: 'demo@example.com', company: { ...demoCompany },
+        user_id: 'u-demo', company_id: demoCompany.id, role: 'owner', username: 'Demó Dániel',
+        email: 'demo@example.com', contact_email: 'demo@example.com', company: { ...demoCompany },
         write_allowed: demoLicenseOk(),
         platform_admin: true,   // demóban látszik a rendszergazda-nézet is, hogy kipróbálható legyen
       };
@@ -648,9 +651,13 @@ function createDemoAdapter() {
       const u = demoUsers.find(x => x.user_id === userId);
       if (u) u.role = role;
     },
-    async createUser({ username, role, contact_email }) {
-      if (demoUsers.some(u => u.username === username)) throw new Error('Ez a felhasználónév már foglalt.');
-      demoUsers.push({ user_id: uid(), role: role || 'office', username, contact_email: contact_email || null, created_at: new Date().toISOString() });
+    async createUser({ email, role, name }) {
+      const mail = normalizeEmail(email);
+      if (demoUsers.some(u => u.email === mail)) throw new Error('Ezzel az e-mail címmel már van fiók.');
+      demoUsers.push({
+        user_id: uid(), role: role || 'office', username: (name || '').trim() || mail.split('@')[0],
+        email: mail, contact_email: mail, created_at: new Date().toISOString(),
+      });
       return { ok: true };
     },
     async deleteUser(userId) {
@@ -660,13 +667,25 @@ function createDemoAdapter() {
       return { ok: true };
     },
     async listCompanies() { return demoCompanies.map(c => ({ ...c })); },
-    async createCompany({ name, license_expires_at, username }) {
+    async createCompany({ name, license_expires_at, email, user_name }) {
+      const mail = normalizeEmail(email);
       demoCompanies.push({
-        id: uid(), name, login_domain: (name || 'ceg').toLowerCase().replace(/[^a-z0-9]+/g, '-') + '.local',
+        id: uid(), name,
         license_expires_at: license_expires_at || null, active: true,
-        created_at: new Date().toISOString(), users: [{ username, role: 'owner' }],
+        created_at: new Date().toISOString(),
+        users: [{ username: (user_name || '').trim() || mail.split('@')[0], email: mail, role: 'owner' }],
+        employee_count: 0, event_count: 0, last_event_at: null,
       });
       return { ok: true };
+    },
+    async deleteCompany({ company_id, confirm_name }) {
+      const c = demoCompanies.find(x => x.id === company_id);
+      if (!c) throw new Error('Nincs ilyen cég.');
+      if (confirm_name !== c.name) throw new Error('A megerősítéshez pontosan a cég nevét kell beírni.');
+      if (c.id === demoCompany.id) throw new Error('A saját cégedet nem törölheted.');
+      if (demoCompanies.indexOf(c) === 0) throw new Error('A legelső cég (az éles ügyfél) törlése a felületről szándékosan nem lehetséges.');
+      demoCompanies.splice(demoCompanies.indexOf(c), 1);
+      return { ok: true, deleted: { company: c.name, users: (c.users || []).length, files: 0 } };
     },
     async updateLicense({ company_id, license_expires_at, active }) {
       const c = demoCompanies.find(x => x.id === company_id);
@@ -989,7 +1008,19 @@ function seedDemo(db) {
 /* ---------- ÉLES adatréteg: Supabase ---------- */
 async function createSupabaseAdapter() {
   const mod = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
-  const sb = mod.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+  // A munkamenet a böngészőben marad és magától frissül, tehát nem kell
+  // naponta belépni (a tényleges felső határt a Supabase Auth → Sessions
+  // beállítása szabja meg; ha ott nincs korlát, a munkamenet addig él, amíg
+  // ki nem jelentkezünk). A PKCE folyam kell a jelszó-visszaállító linkhez.
+  const sb = mod.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      flowType: 'pkce',
+      storageKey: 'mk-auth',
+    },
+  });
   const q = async p => { const { data, error } = await p; if (error) throw new Error(error.message); return data; };
   const T = t => 'mk_' + t;
   const withAttachments = a => {
@@ -1020,7 +1051,7 @@ async function createSupabaseAdapter() {
     // maybeSingle(), mert egy tiszta platform adminnak SZÁNDÉKOSAN nincs
     // cégprofilja (lásd CLAUDE.md "Szerepkörök").
     const [profile, company, writeAllowed, platformAdmin] = await Promise.all([
-      q(sb.from(T('profiles')).select('user_id,company_id,role,username,contact_email').eq('user_id', uid).maybeSingle()),
+      q(sb.from(T('profiles')).select('user_id,company_id,role,username,email,contact_email').eq('user_id', uid).maybeSingle()),
       q(sb.from(T('companies')).select('id,name,license_expires_at,active').maybeSingle()),
       q(sb.rpc('mk_write_allowed')),
       q(sb.rpc('mk_is_platform_admin')),
@@ -1031,6 +1062,7 @@ async function createSupabaseAdapter() {
       company_id: profile ? profile.company_id : null,
       role: profile ? profile.role : null,
       username: profile ? profile.username : null,
+      email: profile ? profile.email : null,
       contact_email: profile ? profile.contact_email : null,
       company: company || null,
       write_allowed: writeAllowed === true,
@@ -1059,7 +1091,7 @@ async function createSupabaseAdapter() {
     async me() { return loadMe(); },
     async refreshMe() { meCache = null; return loadMe(); },
     async listUsers() {
-      return q(sb.from(T('profiles')).select('user_id,role,username,contact_email,created_at').order('username'));
+      return q(sb.from(T('profiles')).select('user_id,role,username,email,contact_email,created_at').order('email'));
     },
     async setUserRole(userId, role) {
       const rows = await q(sb.from(T('profiles')).update({ role }).eq('user_id', userId).select());
@@ -1070,10 +1102,25 @@ async function createSupabaseAdapter() {
     async listCompanies() { return (await callApi('/api/mk-admin', { action: 'list_companies' })).companies; },
     async createCompany(payload) { return callApi('/api/mk-admin', { action: 'create_company', ...payload }); },
     async updateLicense(payload) { return callApi('/api/mk-admin', { action: 'update_license', ...payload }); },
+    async deleteCompany(payload) { return callApi('/api/mk-admin', { action: 'delete_company', ...payload }); },
     async getSession() { const { data } = await sb.auth.getSession(); return data.session; },
     async signIn(email, password) {
       const { error } = await sb.auth.signInWithPassword({ email, password });
-      if (error) throw new Error('Hibás felhasználónév vagy jelszó.');
+      if (error) throw new Error('Hibás e-mail cím vagy jelszó.');
+    },
+    // Jelszó-visszaállító levél. A választ SOHA nem tesszük függővé attól,
+    // létezik-e a fiók – különben a bejelentkező képernyő elárulná, kinek van
+    // itt fiókja. A levelet a Supabase Auth küldi (Resend SMTP-n keresztül).
+    async requestPasswordReset(email) {
+      const redirectTo = location.origin + location.pathname + '?recovery=1';
+      await sb.auth.resetPasswordForEmail(email, { redirectTo });
+    },
+    async updatePassword(password) {
+      const { error } = await sb.auth.updateUser({ password });
+      if (error) throw new Error(error.message || 'Nem sikerült beállítani az új jelszót.');
+    },
+    onPasswordRecovery(cb) {
+      sb.auth.onAuthStateChange((event) => { if (event === 'PASSWORD_RECOVERY') cb(); });
     },
     async signOut() { await sb.auth.signOut(); },
     async loadMaster() {
@@ -1253,7 +1300,13 @@ function licenseNotice() {
 function renderShell() {
   const bar = $('#bar');
   bar.hidden = false;
-  const roleLabel = S.me ? (S.me.role === 'owner' ? 'tulajdonos' : 'irodai') : '';
+  // Egy tiszta rendszergazdának SZÁNDÉKOSAN nincs céges szerepköre (nincs
+  // mk_profiles sora), ezért a role null – korábban ilyenkor tévesen
+  // „irodai" jelent meg a fejlécben.
+  const roles = [];
+  if (S.me && S.me.role) roles.push(S.me.role === 'owner' ? 'tulajdonos' : 'irodai');
+  if (isPlatformAdmin()) roles.push('rendszergazda');
+  const roleLabel = roles.join(' · ');
   bar.innerHTML = `
     <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Munkakövetés</span></div>
     <nav class="tabs" aria-label="Fő menü">
@@ -1266,7 +1319,7 @@ function renderShell() {
     </nav>
     <div class="bar-end">${S.api.mode === 'demo'
       ? '<span class="mode" title="Az adatok csak ebben a böngészőben élnek, újratöltéskor visszaállnak.">Demó adatok</span>'
-      : `<span class="muted small">${esc(loginDisplayName(S.session && S.session.user && S.session.user.email || ''))}${roleLabel ? ' · ' + roleLabel : ''}</span><button class="btn small ghost" data-bar="logout">Kilépés</button>`}</div>`;
+      : `<span class="muted small" title="${esc(sessionEmail())}">${esc(myDisplayName())}${roleLabel ? ' · ' + roleLabel : ''}</span><button class="btn small" data-bar="logout">Kijelentkezés</button>`}</div>`;
   bar.onclick = async ev => {
     if (ev.target.closest('[data-bar="logout"]')) { await S.api.signOut(); location.reload(); }
   };
@@ -1791,15 +1844,15 @@ const ADMIN_RENDER = {
   },
   users() {
     const meId = S.me && S.me.user_id;
-    return `<div class="admin-head"><p class="muted">Kik léphetnek be az irodai felületre ennél a cégnél. A <b>tulajdonos</b> mindent kezelhet, beleértve a felhasználókat; az <b>irodai</b> szerepkör ugyanazt tudja, csak felhasználókat nem vehet fel és nem törölhet. Saját magadat nem tudod átminősíteni vagy törölni – ez szándékos, így nem lehet véletlenül kizárni az utolsó tulajdonost.</p>
+    return `<div class="admin-head"><p class="muted">Kik léphetnek be az irodai felületre ennél a cégnél. Mindenki a saját <b>e-mail címével</b> lép be, és arra kér jelszó-visszaállítót is, ha elfelejtette – ezért valódi, működő cím kell. A <b>tulajdonos</b> mindent kezelhet, beleértve a felhasználókat; az <b>irodai</b> szerepkör ugyanazt tudja, csak felhasználókat nem vehet fel és nem törölhet. Saját magadat nem tudod átminősíteni vagy törölni – ez szándékos, így nem lehet véletlenül kizárni az utolsó tulajdonost.</p>
       <button class="btn btn-primary" data-act="user-new">Új felhasználó</button></div>
-      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Felhasználónév</th><th>Szerepkör</th><th>E-mail (értesítéshez)</th><th></th></tr></thead><tbody>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Név</th><th>E-mail (ezzel lép be)</th><th>Szerepkör</th><th></th></tr></thead><tbody>
       ${S.users.map(u => {
         const self = u.user_id === meId;
         return `<tr>
           <td>${esc(u.username || '–')}${self ? ' <span class="tag">te</span>' : ''}</td>
+          <td>${esc(u.email || u.contact_email || '–')}</td>
           <td>${u.role === 'owner' ? 'tulajdonos' : 'irodai'}</td>
-          <td>${esc(u.contact_email || '–')}</td>
           <td class="actions">${self ? '<span class="muted small">saját fiók</span>' : `
             <button class="btn small" data-act="user-role" data-id="${u.user_id}" data-v="${u.role === 'owner' ? 'office' : 'owner'}">${u.role === 'owner' ? 'Legyen irodai' : 'Legyen tulajdonos'}</button>
             <button class="btn small ghost" data-act="user-del" data-id="${u.user_id}" data-name="${esc(u.username || '')}">Törlés</button>`}</td>
@@ -1814,21 +1867,22 @@ const ADMIN_RENDER = {
 function userModal() {
   openModal({
     title: 'Új felhasználó',
-    body: `<label class="field"><span>Felhasználónév</span><input id="f-user" maxlength="40" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="pl. anna"></label>
+    body: `<label class="field"><span>E-mail cím (ezzel fog belépni)</span><input id="f-mail" type="email" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="pl. anna@ceg.hu"></label>
+      <label class="field"><span>Név (megjelenítéshez, nem kötelező)</span><input id="f-user" maxlength="40" placeholder="pl. Kovács Anna"></label>
       <label class="field"><span>Jelszó</span><input id="f-pass" type="password" autocomplete="new-password" placeholder="legalább 12 karakter, betű és szám"></label>
       <label class="field"><span>Szerepkör</span><select id="f-role"><option value="office">irodai</option><option value="owner">tulajdonos</option></select></label>
-      <label class="field"><span>E-mail cím (valódi, értesítéshez)</span><input id="f-mail" type="email" placeholder="pl. anna@ceg.hu"></label>
-      <p class="muted small">Az e-mail cím nem a bejelentkezéshez kell – az továbbra is a felhasználónévvel megy. Azért kérjük, hogy később, a kétlépcsős azonosítás bevezetésekor legyen hova kódot küldeni, ha valaki elveszti a telefonját.</p>`,
+      <p class="muted small">Valódi, működő cím kell: ezzel lép be, és ide kap jelszó-visszaállító levelet, ha elfelejti a jelszavát. A jelszót add át neki, és kérd meg, hogy lépjen be vele.</p>`,
     actions: [{ label: 'Mégse' }, {
       label: 'Felvétel', primary: true, onClick: async modal => {
-        const username = $('#f-user', modal).value.trim();
+        const email = normalizeEmail($('#f-mail', modal).value);
         const password = $('#f-pass', modal).value;
-        if (!username) throw new Error('Add meg a felhasználónevet.');
-        if (password.length < 12) throw new Error('A jelszó legyen legalább 12 karakter.');
+        if (!isEmail(email)) throw new Error('Add meg az e-mail címet.');
+        const bad = badPasswordMsg(password);
+        if (bad) throw new Error(bad);
         await S.api.createUser({
-          username, password,
+          email, password,
           role: $('#f-role', modal).value,
-          contact_email: $('#f-mail', modal).value.trim(),
+          name: $('#f-user', modal).value.trim(),
         });
         S.users = await S.api.listUsers();
         renderAdmin();
@@ -1843,24 +1897,25 @@ function companyModal() {
     title: 'Új cég',
     body: `<label class="field"><span>Cégnév</span><input id="f-cname" maxlength="80" placeholder="pl. Kovács Kft"></label>
       <label class="field"><span>Licenc lejárata</span><input id="f-exp" type="date"></label>
-      <label class="field"><span>Első felhasználó neve</span><input id="f-user" maxlength="40" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="pl. iroda"></label>
+      <label class="field"><span>Első felhasználó e-mail címe</span><input id="f-mail" type="email" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="pl. iroda@kovacskft.hu"></label>
+      <label class="field"><span>Neve (megjelenítéshez, nem kötelező)</span><input id="f-user" maxlength="40" placeholder="pl. Kovács Anna"></label>
       <label class="field"><span>Jelszava</span><input id="f-pass" type="password" autocomplete="new-password" placeholder="legalább 12 karakter, betű és szám"></label>
-      <label class="field"><span>E-mail cím (valódi, értesítéshez)</span><input id="f-mail" type="email"></label>
       <label class="check"><input type="checkbox" id="f-sample"> Példa törzsadatok betöltése (csapatok, helyszínek, feladatok, tabletek – utólag átnevezhetők)</label>
-      <p class="muted small">Az első felhasználó tulajdonosi jogot kap, és ő veheti fel a cég többi kollégáját. A bejelentkezési domaint a cégnévből képezzük.</p>`,
+      <p class="muted small">Az első felhasználó tulajdonosi jogot kap, és ő veheti fel a cég többi kollégáját. Az e-mail cím a bejelentkezési azonosítója is, ezért valódi, működő cím kell.</p>`,
     actions: [{ label: 'Mégse' }, {
       label: 'Létrehozás', primary: true, onClick: async modal => {
         const name = $('#f-cname', modal).value.trim();
-        const username = $('#f-user', modal).value.trim();
+        const email = normalizeEmail($('#f-mail', modal).value);
         const password = $('#f-pass', modal).value;
         if (!name) throw new Error('Add meg a cég nevét.');
-        if (!username) throw new Error('Add meg az első felhasználó nevét.');
-        if (password.length < 12) throw new Error('A jelszó legyen legalább 12 karakter.');
+        if (!isEmail(email)) throw new Error('Add meg az első felhasználó e-mail címét.');
+        const bad = badPasswordMsg(password);
+        if (bad) throw new Error(bad);
         const exp = $('#f-exp', modal).value;
         await S.api.createCompany({
-          name, username, password,
+          name, email, password,
           license_expires_at: exp ? new Date(exp + 'T23:59:59').toISOString() : null,
-          contact_email: $('#f-mail', modal).value.trim(),
+          user_name: $('#f-user', modal).value.trim(),
           sample_data: $('#f-sample', modal).checked,
         });
         S.companies = await S.api.listCompanies();
@@ -1897,21 +1952,52 @@ function licenseModal(companyId) {
   });
 }
 
+/* Cég és minden adatának végleges törlése. A név begépeltetése szándékos:
+   ez az egyetlen visszafordíthatatlan művelet a felületen, és a GDPR
+   szerinti végleges törlés is ezen az úton megy majd. */
+function companyDeleteModal(companyId, companyName) {
+  const c = S.companies.find(x => x.id === companyId);
+  if (!c) return;
+  openModal({
+    title: `Cég törlése – ${companyName}`,
+    body: `<p><b>Ez a művelet nem vonható vissza.</b> Törlődik a cég minden adata:
+        ${Number(c.employee_count || 0)} dolgozó, ${Number(c.event_count || 0)} esemény, a beosztások,
+        a feltöltött rajzok és ${(c.users || []).length} bejelentkezési fiók.</p>
+      <p class="muted">A dolgozók munkaideje és a riportok is elvesznek – ha kellhet még, előbb töltsd le az Excel exportot a cég fiókjával.</p>
+      <label class="field"><span>Írd be a cég nevét a megerősítéshez: <b>${esc(companyName)}</b></span>
+        <input id="f-confirm" autocapitalize="none" autocorrect="off" spellcheck="false"></label>`,
+    actions: [{ label: 'Mégse' }, {
+      label: 'Végleges törlés', primary: true, onClick: async modal => {
+        const confirmName = $('#f-confirm', modal).value.trim();
+        if (confirmName !== companyName) throw new Error('A megerősítéshez pontosan a cég nevét kell beírni.');
+        const res = await S.api.deleteCompany({ company_id: companyId, confirm_name: confirmName });
+        S.companies = await S.api.listCompanies();
+        renderCompanies();
+        const d = (res && res.deleted) || {};
+        toast(`Cég törölve${d.files ? ` (${d.files} fájllal együtt)` : ''}`);
+      },
+    }],
+  });
+}
+
 /* ---------- CÉGEK (csak rendszergazdának) ---------- */
 function renderCompanies() {
   $('#view').innerHTML = `<section class="admin">
     <div class="toolbar"><h1 class="view-title">Cégek</h1></div>
     <div class="admin-head"><p class="muted">Rendszergazda-nézet: az összes ügyfélcég és a licencük. A cégek napi adatait (dolgozók, munkaidő, riportok) ez a nézet szándékosan nem mutatja – a rendszergazdának nincs rálátása egy cég üzleti adataira.</p>
       <button class="btn btn-primary" data-act="company-new">Új cég</button></div>
-    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Cég</th><th>Bejelentkezési domain</th><th>Felhasználók</th><th>Licenc</th><th></th></tr></thead><tbody>
-    ${S.companies.map(c => {
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Cég</th><th>Felhasználók</th><th>Használat</th><th>Licenc</th><th></th></tr></thead><tbody>
+    ${S.companies.map((c, i) => {
       const expired = c.active === false || (c.license_expires_at && new Date(c.license_expires_at) < new Date());
+      const mine = S.me && S.me.company_id === c.id;
       return `<tr class="${expired ? 'is-off' : ''}">
-        <td>${esc(c.name)}</td>
-        <td><code class="small">${esc(c.login_domain || '–')}</code></td>
-        <td>${(c.users || []).map(u => esc(u.username || '?') + (u.role === 'owner' ? ' (tul.)' : '')).join(', ') || '–'}</td>
+        <td>${esc(c.name)}${i === 0 ? ' <span class="tag">első cég</span>' : ''}${mine ? ' <span class="tag">a te céged</span>' : ''}
+          <div class="muted small">létrehozva: ${c.created_at ? esc(fmtDateHu(budapestDay(c.created_at))) : '–'}</div></td>
+        <td>${(c.users || []).map(u => `<div>${esc(u.username || u.email || '?')}${u.role === 'owner' ? ' <span class="muted small">(tul.)</span>' : ''}<div class="muted small">${esc(u.email || '–')}</div></div>`).join('') || '–'}</td>
+        <td>${Number(c.employee_count || 0)} dolgozó<div class="muted small">${Number(c.event_count || 0)} esemény${c.last_event_at ? ', utoljára ' + esc(fmtDateHu(budapestDay(c.last_event_at))) : ''}</div></td>
         <td>${c.active === false ? '<span class="tag">felfüggesztve</span> ' : ''}${c.license_expires_at ? esc(fmtDateLong(new Date(c.license_expires_at))) + (expired && c.active !== false ? ' <span class="tag">lejárt</span>' : '') : 'nincs lejárat'}</td>
-        <td class="actions"><button class="btn small" data-act="company-license" data-id="${c.id}">Licenc</button></td>
+        <td class="actions"><button class="btn small" data-act="company-license" data-id="${c.id}">Licenc</button>${
+          i === 0 || mine ? '' : `<button class="btn small ghost" data-act="company-del" data-id="${c.id}" data-name="${esc(c.name)}">Törlés</button>`}</td>
       </tr>`;
     }).join('')}
     </tbody></table></div>`;
@@ -3061,30 +3147,104 @@ function toast(msg) {
 }
 
 /* ---------- Bejelentkezés (éles mód) ---------- */
-function renderLogin(err) {
+function loginShell(inner) {
   $('#bar').hidden = true;
   const v = $('#view');
   v.className = 'view view-login';
   v.innerHTML = `<section class="login-box">
     <span class="brand-mark big" aria-hidden="true"><i></i><i></i><i></i></span>
     <h1>Munkakövetés</h1>
-    <p class="muted">Irodai bejelentkezés</p>
-    <label class="field"><span>Felhasználónév</span><input id="l-user" type="text" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false"></label>
+    ${inner}
+  </section>`;
+  return v;
+}
+
+function renderLogin(err, email) {
+  loginShell(`<p class="muted">Irodai bejelentkezés</p>
+    <label class="field"><span>E-mail cím</span><input id="l-user" type="email" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" value="${esc(email || '')}"></label>
     <label class="field"><span>Jelszó</span><input id="l-pass" type="password" autocomplete="current-password"></label>
     ${err ? `<p class="form-err">${esc(err)}</p>` : ''}
     <button class="btn btn-primary wide" id="l-go">Bejelentkezés</button>
-  </section>`;
+    <button class="btn ghost wide" id="l-forgot">Elfelejtett jelszó</button>`);
   const submit = async () => {
+    const mail = normalizeEmail($('#l-user').value);
+    if (!isEmail(mail)) return renderLogin('Add meg a teljes e-mail címedet.', $('#l-user').value);
     $('#l-go').disabled = true;
     try {
-      await S.api.signIn(loginEmail($('#l-user').value), $('#l-pass').value);
+      await S.api.signIn(mail, $('#l-pass').value);
       S.session = await S.api.getSession();
       await afterLogin();
-    } catch (e) { renderLogin(e.message); }
+    } catch (e) { renderLogin(e.message, mail); }
   };
   $('#l-go').onclick = submit;
+  $('#l-forgot').onclick = () => renderForgot(null, $('#l-user').value);
   $('#l-pass').onkeydown = e => { if (e.key === 'Enter') submit(); };
   $('#l-user').focus();
+}
+
+/* Jelszó-visszaállítás kérése. A visszajelzés szándékosan mindig ugyanaz,
+   akkor is, ha nincs ilyen fiók – különben a képernyő elárulná, kinek van
+   itt hozzáférése. */
+function renderForgot(msg, email) {
+  loginShell(`<p class="muted">Elfelejtett jelszó</p>
+    ${msg ? `<p class="muted">${esc(msg)}</p>` : `<p class="muted small">Add meg az e-mail címedet, és küldünk egy linket, amivel új jelszót állíthatsz be. A link egy óráig érvényes.</p>
+    <label class="field"><span>E-mail cím</span><input id="l-user" type="email" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" value="${esc(email || '')}"></label>
+    <button class="btn btn-primary wide" id="l-send">Link kérése</button>`}
+    <button class="btn ghost wide" id="l-back">Vissza a bejelentkezéshez</button>`);
+  $('#l-back').onclick = () => renderLogin();
+  const send = $('#l-send');
+  if (send) {
+    const submit = async () => {
+      const mail = normalizeEmail($('#l-user').value);
+      if (!isEmail(mail)) { toast('Add meg a teljes e-mail címedet.'); return; }
+      send.disabled = true;
+      try { await S.api.requestPasswordReset(mail); } catch (e) { /* a választ nem tesszük függővé tőle */ }
+      renderForgot('Ha van ehhez a címhez fiók, elküldtük a linket. Nézd meg a postafiókodat (a levélszemetet is).');
+    };
+    send.onclick = submit;
+    $('#l-user').onkeydown = e => { if (e.key === 'Enter') submit(); };
+    $('#l-user').focus();
+  }
+}
+
+/* Új jelszó megadása a levélből érkezve. Ide csak érvényes visszaállító
+   munkamenettel lehet eljutni – ha az lejárt, új linket kell kérni. */
+function renderNewPassword(err) {
+  loginShell(`<p class="muted">Új jelszó beállítása</p>
+    <label class="field"><span>Új jelszó</span><input id="l-pass" type="password" autocomplete="new-password" placeholder="legalább ${CONFIG.PASSWORD_MIN} karakter, betű és szám"></label>
+    <label class="field"><span>Új jelszó még egyszer</span><input id="l-pass2" type="password" autocomplete="new-password"></label>
+    ${err ? `<p class="form-err">${esc(err)}</p>` : ''}
+    <button class="btn btn-primary wide" id="l-save">Jelszó mentése</button>
+    <button class="btn ghost wide" id="l-back">Mégse</button>`);
+  $('#l-back').onclick = async () => { await S.api.signOut(); location.replace(location.pathname); };
+  const submit = async () => {
+    const pw = $('#l-pass').value, pw2 = $('#l-pass2').value;
+    const bad = badPasswordMsg(pw);
+    if (bad) return renderNewPassword(bad);
+    if (pw !== pw2) return renderNewPassword('A két jelszó nem egyezik.');
+    $('#l-save').disabled = true;
+    try {
+      await S.api.updatePassword(pw);
+    } catch (e) {
+      return renderNewPassword((e.message || '') + ' Lehet, hogy lejárt a link – kérj újat.');
+    }
+    // A címsorból tűnjön el a visszaállító paraméter, hogy egy frissítés ne
+    // dobja vissza ide a felhasználót.
+    history.replaceState(null, '', location.pathname);
+    S.session = await S.api.getSession();
+    if (S.session) { toast('Az új jelszó beállítva'); await afterLogin(); }
+    else renderLogin('Az új jelszó beállítva, jelentkezz be vele.');
+  };
+  $('#l-save').onclick = submit;
+  $('#l-pass2').onkeydown = e => { if (e.key === 'Enter') submit(); };
+  $('#l-pass').focus();
+}
+
+/* Ugyanaz a szabály, mint a szerveren (src/lib/mk-supabase.ts badPassword). */
+function badPasswordMsg(pw) {
+  if (typeof pw !== 'string' || pw.length < CONFIG.PASSWORD_MIN) return `A jelszó legyen legalább ${CONFIG.PASSWORD_MIN} karakter.`;
+  if (!/[a-zA-ZÁÉÍÓÖŐÚÜŰáéíóöőúüű]/.test(pw) || !/[0-9]/.test(pw)) return 'A jelszó tartalmazzon betűt és számot is.';
+  return null;
 }
 
 /* ---------- Kattintások, változások, billentyűzet ---------- */
@@ -3158,6 +3318,7 @@ const ACTIONS = {
   }),
   'company-new': () => companyModal(),
   'company-license': el => licenseModal(el.dataset.id),
+  'company-del': el => companyDeleteModal(el.dataset.id, el.dataset.name),
   'rep-tab': el => { S.reports.tab = el.dataset.v; renderReports(); },
   'rep-print': () => window.print(),
   'rep-excel': () => exportReportsExcel(),
@@ -3279,7 +3440,13 @@ async function boot() {
   v.addEventListener('click', onViewClick);
   v.addEventListener('change', onViewChange);
   document.addEventListener('keydown', onKey);
-  const terminalId = new URLSearchParams(location.search).get('terminal');
+  const params = new URLSearchParams(location.search);
+  const terminalId = params.get('terminal');
+  // A jelszó-visszaállító levélből ezzel a jelzéssel térünk vissza. Kétféle
+  // jelet is nézünk, mert a Supabase folyamtól függően hol a query, hol a
+  // hash hordozza – egy elmulasztott jelzés azt jelentené, hogy a felhasználó
+  // bejelentkezve landol, de az új jelszót sosem tudja megadni.
+  const recoveryHint = params.get('recovery') === '1' || /type=recovery/.test(location.hash);
   const live = Boolean(CONFIG.SUPABASE_URL && CONFIG.SUPABASE_ANON_KEY);
   try {
     S.api = live ? await createSupabaseAdapter() : createDemoAdapter();
@@ -3294,7 +3461,9 @@ async function boot() {
     await startTerminal(terminalId, v);
     return;
   }
+  if (S.api.onPasswordRecovery) S.api.onPasswordRecovery(() => renderNewPassword());
   S.session = await S.api.getSession();
+  if (recoveryHint) return renderNewPassword();
   if (!S.session) return renderLogin();
   await afterLogin();
 }

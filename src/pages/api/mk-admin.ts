@@ -15,13 +15,14 @@ import {
     adminAuth,
     adminRest,
     adminRestJson,
+    adminStorage,
+    badEmail,
     badPassword,
-    companyLoginDomain,
     identifyCaller,
     isPlatformAdmin,
     json,
-    serviceKey,
-    usernameToEmail
+    normalizeEmail,
+    serviceKey
 } from '../../lib/mk-supabase';
 
 export const prerender = false;
@@ -53,6 +54,7 @@ export const POST: APIRoute = async ({ request }) => {
         if (action === 'list_companies') return await listCompanies(key);
         if (action === 'create_company') return await createCompany(key, body);
         if (action === 'update_license') return await updateLicense(key, body);
+        if (action === 'delete_company') return await deleteCompany(key, caller.userId, body);
         return json({ error: 'Ismeretlen művelet.' }, 400);
     } catch (e: any) {
         return json({ error: e?.message || 'Nem sikerült végrehajtani a műveletet.' }, 500);
@@ -64,46 +66,70 @@ async function listCompanies(key: string): Promise<Response> {
         key,
         'mk_companies?select=id,name,login_domain,license_expires_at,active,created_at&order=created_at'
     );
-    const profiles = await adminRestJson<any[]>(key, 'mk_profiles?select=company_id,role,username');
-    return json({
-        companies: companies.map((c) => ({
-            ...c,
-            users: profiles.filter((p) => p.company_id === c.id).map((p) => ({ username: p.username, role: p.role }))
-        }))
+    const profiles = await adminRestJson<any[]>(key, 'mk_profiles?select=company_id,role,username,email');
+    // Mennyi adata van a cégnek – ebből látszik, hogy egy cég tényleg
+    // használja-e a rendszert, és mennyit vinne el egy törlés. Cégenként pár
+    // kérés, a cégek száma kicsi.
+    const enriched = await Promise.all(
+        companies.map(async (c) => {
+            const [employeeCount, eventCount, lastEvent] = await Promise.all([
+                countRows(key, `mk_employees?company_id=eq.${c.id}&archived_at=is.null`),
+                countRows(key, `mk_events?company_id=eq.${c.id}`),
+                adminRestJson<any[]>(
+                    key,
+                    `mk_events?company_id=eq.${c.id}&select=event_time&order=event_time.desc&limit=1`
+                )
+            ]);
+            return {
+                ...c,
+                users: profiles
+                    .filter((p) => p.company_id === c.id)
+                    .map((p) => ({ username: p.username, email: p.email, role: p.role })),
+                employee_count: employeeCount,
+                event_count: eventCount,
+                last_event_at: lastEvent.length ? lastEvent[0].event_time : null
+            };
+        })
+    );
+    return json({ companies: enriched });
+}
+
+/** Sorok száma egy PostgREST szűrőre, a válasz Content-Range fejlécéből. */
+async function countRows(key: string, path: string): Promise<number> {
+    const res = await adminRest(key, `${path}&select=id`, {
+        method: 'HEAD',
+        headers: { prefer: 'count=exact' }
     });
+    const range = res.headers.get('content-range') || '';
+    const total = Number(range.split('/')[1]);
+    return Number.isFinite(total) ? total : 0;
 }
 
 async function createCompany(key: string, body: any): Promise<Response> {
     const name = typeof body?.name === 'string' ? body.name.trim() : '';
     const licenseExpiresAt = body?.license_expires_at || null;
-    const username = typeof body?.username === 'string' ? body.username.trim() : '';
+    // Az első felhasználó a saját, valódi e-mail címével jön létre – ez a
+    // bejelentkezési azonosítója is (005). Bejelentkezési domain már nincs.
+    const email = normalizeEmail(body?.email);
     const password = body?.password;
-    const contactEmail = typeof body?.contact_email === 'string' ? body.contact_email.trim() : '';
+    const userName = typeof body?.user_name === 'string' ? body.user_name.trim() : '';
     const withSample = body?.sample_data === true;
 
     if (!name) return json({ error: 'A cégnév kötelező.' }, 400);
-    if (!username) return json({ error: 'Az első felhasználó neve kötelező.' }, 400);
+    const emailErr = badEmail(email);
+    if (emailErr) return json({ error: `Az első felhasználónál: ${emailErr.toLowerCase()}` }, 400);
     const pwErr = badPassword(password);
     if (pwErr) return json({ error: pwErr }, 400);
 
-    const domain = typeof body?.login_domain === 'string' && body.login_domain.trim()
-        ? body.login_domain.trim().toLowerCase()
-        : companyLoginDomain(name);
-
-    const taken = await adminRestJson<any[]>(
-        key,
-        `mk_companies?login_domain=eq.${encodeURIComponent(domain)}&select=id`
-    );
-    if (taken.length) return json({ error: `Ez a bejelentkezési domain már foglalt: ${domain}` }, 409);
+    const username = userName || email.split('@')[0];
 
     const companies = await adminRestJson<any[]>(key, 'mk_companies', {
         method: 'POST',
         headers: { prefer: 'return=representation' },
-        body: JSON.stringify({ name, login_domain: domain, license_expires_at: licenseExpiresAt, active: true })
+        body: JSON.stringify({ name, license_expires_at: licenseExpiresAt, active: true })
     });
     const company = companies[0];
 
-    const email = usernameToEmail(username, domain);
     const createRes = await adminAuth(key, 'admin/users', {
         method: 'POST',
         body: JSON.stringify({ email, password, email_confirm: true })
@@ -115,7 +141,7 @@ async function createCompany(key: string, body: any): Promise<Response> {
         const err: any = await createRes.json().catch(() => null);
         const msg = (err && (err.msg || err.message)) || '';
         if (/already/i.test(msg) || createRes.status === 422) {
-            return json({ error: 'Ez a felhasználónév már foglalt.' }, 409);
+            return json({ error: 'Ezzel az e-mail címmel már van fiók.' }, 409);
         }
         return json({ error: 'Nem sikerült létrehozni az első felhasználót.' }, 500);
     }
@@ -128,7 +154,8 @@ async function createCompany(key: string, body: any): Promise<Response> {
             company_id: company.id,
             role: 'owner',
             username,
-            contact_email: contactEmail || null
+            email,
+            contact_email: email
         })
     });
     if (!profileRes.ok) {
@@ -158,6 +185,126 @@ async function updateLicense(key: string, body: any): Promise<Response> {
     });
     if (!rows.length) return json({ error: 'Nincs ilyen cég.' }, 404);
     return json({ ok: true, company: rows[0] });
+}
+
+// A rajzok privát Storage bucketje. A fájlok NEM a Postgresben vannak, ezért
+// egy cég törlésekor külön, a Storage API-n keresztül kell elvinni őket –
+// SQL-lel nem lehet (lásd CLAUDE.md, "Migráció" 4. pont ugyanerről).
+const BUCKET = 'mk-rajzok';
+
+// A cég üzleti tábláinak törlési sorrendje (idegenkulcs-függés szerint).
+// Ugyanaz a sorrend, mint a db/proba_ceg_torles.sql-ben.
+const COMPANY_TABLES = [
+    'mk_events',
+    'mk_assignment_attachments',
+    'mk_attachments',
+    'mk_assignments',
+    'mk_pins',
+    'mk_pin_failures',
+    'mk_employees',
+    'mk_tasks',
+    'mk_terminals',
+    'mk_teams',
+    'mk_locations'
+];
+
+/**
+ * Egy cég és MINDEN adatának végleges törlése. Visszafordíthatatlan.
+ *
+ * Három védelem, mielőtt bármit törölnénk:
+ *   1) a hívónak be kell gépelnie a cég pontos nevét (confirm_name),
+ *   2) a saját cégét nem törölheti (nem lőheti ki maga alól a hozzáférést),
+ *   3) a legelső (legrégebbi) céget nem törli – az a BREMAT, az éles ügyfél.
+ *      Ha valaha tényleg azt kell törölni, az tudatos, kézi művelet legyen
+ *      (db/proba_ceg_torles.sql), ne egy elgépelt kattintás következménye.
+ *
+ * Ez egyben a GDPR szerinti végleges törlés alapja is (lásd CLAUDE.md
+ * "Adatmegőrzés és törlés a szerződés végén").
+ */
+async function deleteCompany(key: string, callerId: string, body: any): Promise<Response> {
+    const companyId = typeof body?.company_id === 'string' ? body.company_id : '';
+    const confirmName = typeof body?.confirm_name === 'string' ? body.confirm_name.trim() : '';
+    if (!companyId) return json({ error: 'Hiányzó cég.' }, 400);
+
+    const rows = await adminRestJson<any[]>(
+        key,
+        `mk_companies?id=eq.${encodeURIComponent(companyId)}&select=id,name,created_at`
+    );
+    if (!rows.length) return json({ error: 'Nincs ilyen cég.' }, 404);
+    const company = rows[0];
+
+    if (confirmName !== company.name) {
+        return json({ error: 'A megerősítéshez pontosan a cég nevét kell beírni.' }, 400);
+    }
+
+    const oldest = await adminRestJson<any[]>(key, 'mk_companies?select=id&order=created_at&limit=1');
+    if (oldest.length && oldest[0].id === company.id) {
+        return json(
+            { error: 'A legelső cég (az éles ügyfél) törlése a felületről szándékosan nem lehetséges.' },
+            403
+        );
+    }
+
+    const profiles = await adminRestJson<any[]>(
+        key,
+        `mk_profiles?company_id=eq.${encodeURIComponent(companyId)}&select=user_id`
+    );
+    if (profiles.some((p) => p.user_id === callerId)) {
+        return json({ error: 'A saját cégedet nem törölheted.' }, 400);
+    }
+
+    // 1) Storage: a <company_id>/ prefix alatti összes fájl.
+    const files = await listStorageFiles(key, `${companyId}/`);
+    if (files.length) {
+        const res = await adminStorage(key, `object/${BUCKET}`, {
+            method: 'DELETE',
+            body: JSON.stringify({ prefixes: files })
+        });
+        if (!res.ok) {
+            return json(
+                { error: 'A feltöltött rajzokat nem sikerült törölni, ezért a cég adatait sem töröltem.' },
+                502
+            );
+        }
+    }
+
+    // 2) Üzleti adat, idegenkulcs-sorrendben.
+    for (const table of COMPANY_TABLES) {
+        await adminRest(key, `${table}?company_id=eq.${encodeURIComponent(companyId)}`, { method: 'DELETE' });
+    }
+
+    // 3) Bejelentkezési fiókok. Az auth.users törlése az mk_profiles sort is
+    //    elviszi (on delete cascade), így nem marad árva profil.
+    for (const p of profiles) {
+        await adminAuth(key, `admin/users/${encodeURIComponent(p.user_id)}`, { method: 'DELETE' }).catch(
+            () => null
+        );
+    }
+    await adminRest(key, `mk_profiles?company_id=eq.${encodeURIComponent(companyId)}`, { method: 'DELETE' });
+
+    // 4) Maga a cég.
+    await adminRest(key, `mk_companies?id=eq.${encodeURIComponent(companyId)}`, { method: 'DELETE' });
+
+    return json({ ok: true, deleted: { company: company.name, users: profiles.length, files: files.length } });
+}
+
+/** A bucket összes fájlja egy prefix alatt, rekurzívan (a mappák maguk nem fájlok). */
+async function listStorageFiles(key: string, prefix: string): Promise<string[]> {
+    const res = await adminStorage(key, `object/list/${BUCKET}`, {
+        method: 'POST',
+        body: JSON.stringify({ prefix, limit: 1000, offset: 0, sortBy: { column: 'name', order: 'asc' } })
+    });
+    if (!res.ok) return [];
+    const entries: any[] = await res.json().catch(() => []);
+
+    const files: string[] = [];
+    for (const entry of entries) {
+        if (!entry || !entry.name) continue;
+        // A Storage a mappákat is visszaadja, id nélkül – azokba lépni kell.
+        if (entry.id) files.push(`${prefix}${entry.name}`);
+        else files.push(...(await listStorageFiles(key, `${prefix}${entry.name}/`)));
+    }
+    return files;
 }
 
 // Opcionális minta-törzsadat egy új cégnek (a mai BREMAT-mintát követi, az

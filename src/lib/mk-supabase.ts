@@ -54,6 +54,15 @@ export async function adminAuth(key: string, path: string, init: RequestInit = {
     });
 }
 
+/** Storage API. A feltöltött rajzok NEM SQL-lel törölhetők (a fájlok nem a
+ *  Postgresben vannak), ezért a cégtörlésnek ezen az úton kell mennie. */
+export async function adminStorage(key: string, path: string, init: RequestInit = {}): Promise<Response> {
+    return fetch(`${SUPABASE_URL}/storage/v1/${path}`, {
+        ...init,
+        headers: { ...adminHeaders(key), ...(init.headers as Record<string, string> | undefined) }
+    });
+}
+
 export type Caller = { userId: string };
 
 /**
@@ -93,31 +102,23 @@ export async function isPlatformAdmin(key: string, userId: string): Promise<bool
 }
 
 /**
- * Felhasználónév → e-mail, ugyanazzal a szabállyal, amit a kliens is használ
- * (kisbetű, ékezet le, szóköz → pont). Fontos, hogy a kettő egyezzen, különben
- * a felvett felhasználó nem tudna a saját nevével bejelentkezni.
+ * Bejelentkezési e-mail cím normalizálása. A 005 óta az e-mail MAGA a
+ * bejelentkezési azonosító – nincs többé felhasználónév + kitalált domain,
+ * mert az auth.users.email globálisan egyedi, tehát önmagában megmondja,
+ * melyik céghez tartozik a belépő (lásd CLAUDE.md, e-mailes bejelentkezés).
+ * Csak a felesleges szóközt vesszük le és kisbetűsítünk – a címet magát
+ * NEM alakítjuk át, mert az a felhasználó valódi postafiókja.
  */
-export function usernameToEmail(username: string, domain: string): string {
-    const slug = username
-        .normalize('NFD')
-        .replace(/[̀-ͯ]/g, '')
-        .toLowerCase()
-        .trim()
-        .replace(/\s+/g, '.');
-    return slug.includes('@') ? slug : `${slug}@${domain}`;
+export function normalizeEmail(raw: unknown): string {
+    return typeof raw === 'string' ? raw.trim().toLowerCase() : '';
 }
 
-/** Cégnév → bejelentkezési domain (pl. „Kovács Kft." → kovacs-kft.local). */
-export function companyLoginDomain(name: string): string {
-    const slug =
-        name
-            .normalize('NFD')
-            .replace(/[̀-ͯ]/g, '')
-            .toLowerCase()
-            .replace(/[^a-z0-9]+/g, '-')
-            .replace(/^-+|-+$/g, '')
-            .slice(0, 40) || 'ceg';
-    return `${slug}.local`;
+/** Egyszerű alaki ellenőrzés; a tényleges kézbesíthetőséget a levélküldés dönti el. */
+export function badEmail(raw: unknown): string | null {
+    const email = normalizeEmail(raw);
+    if (!email) return 'Az e-mail cím kötelező.';
+    if (!/^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/.test(email)) return 'Ez nem érvényes e-mail cím.';
+    return null;
 }
 
 export function badPassword(pw: unknown): string | null {
