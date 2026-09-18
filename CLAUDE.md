@@ -175,7 +175,7 @@ Egy új, csak platform-adminnak látható nézet: cégnév, licenc-lejárat, els
 - **Amit a licenc-lejárat szándékosan NEM blokkol:** a cég nevének javítását és a felhasználó-kezelést (`mk_profiles`). Ezek adminisztratív műveletek – egy lejárt előfizetésnél is kell tudni hozzáférést elvenni, ugyanúgy, ahogy egy lejárt SaaS-előfizetésnél a fiókbeállítások elérhetők maradnak.
 
 ### Bejelentkezés és MFA
-- **Login UX marad**: felhasználónév + kitalált domain (mai minta), kiegészítve cég-azonosítóval – amíg csak BREMAT létezik, a UX nem változik.
+- **Login UX marad**: felhasználónév + kitalált domain (mai minta), kiegészítve cég-azonosítóval – amíg csak BREMAT létezik, a UX nem változik. **FIGYELEM: a „kiegészítve cég-azonosítóval” rész NINCS megépítve**, és a végigkattintós próba szerint ez blokkolja a 2. ügyfelet – lásd „Ütemterv” → „Nyitott hiányosságok”, 1. pont.
 - **Jelszó + TOTP** (Supabase Auth natív MFA, `auth.mfa.enroll/challenge/verify`), nincs hozzá extra szolgáltatás.
 - **"Megbízható eszközön 30 napig ne kérdezze újra"**: ez nem Supabase-natív – egy saját `mk_trusted_devices` (user_id + eszköz-token + lejárat) rekord, sikeres MFA után beállítva. UX-kényelem, nem biztonsági garancia: a jelszó ellopott tokennel is kell a belépéshez.
 - **E-mailes kód mint MFA-tartalék** (aki nem használ TOTP appot): ehhez **valós e-mail cím kell minden felhasználóhoz, külön mezőként** – ez bekerül az onboarding űrlapba (nem a bejelentkezési névtől függ, csak az MFA-tartalék e-mail kiküldés célja). Kell hozzá egy külső tranzakciós email-szolgáltatás (pl. Resend/Postmark – a Supabase beépített levélküldője csak tesztre elég, túl szűk rate-limittel).
@@ -214,7 +214,7 @@ Egy `mk_access_log` tábla rögzíti, ki mikor melyik cég adatához fért hozz�
 ### Adatmegőrzés és törlés a szerződés végén
 - **Szerződés megszűnése után egy türelmi időszak (javaslat: 30 nap)**, amíg az adat megmarad, de a licenc-lejárathoz hasonló "csak olvasható" állapotban (lásd Licenc) – ha téves volt a lemondás, ez alatt még visszakapcsolható.
 - **Export (GDPR adathordozhatóság):** az ügyfél kérésére egy "Teljes export" a Riportok Excel-exportján felül a törzsadatokat (dolgozók, feladatok, helyszínek, csapatok, tabletek) és a csatolt rajzokat is tartalmazza (egy ZIP-be csomagolva, a fájlokkal együtt) – ez a mai Riport-export bővítése, még nincs megépítve.
-- **Végleges törlés** a türelmi időszak lejártával, dokumentált, ellenőrzött lépéssorban (nem kézi, sorról-sorra törlés): `DELETE ... WHERE company_id = X` minden `mk_` táblán a megfelelő sorrendben (vagy CASCADE-del), a `<company_id>/` prefixű Storage-objektumok törlése a Storage API-val (nem SQL-lel megy, lásd Migráció), és a céghez tartozó `auth.users` sorok törlése az Admin API-val. A `mk_access_log` bejegyzései nem törlődnek, csak anonimizálódnak (lásd Hozzáférési napló).
+- **Végleges törlés** a türelmi időszak lejártával, dokumentált, ellenőrzött lépéssorban (nem kézi, sorról-sorra törlés). **Ez a lépéssor le van írva, de NINCS megépítve** – ma csak SQL-ből megy (`db/proba_ceg_torles.sql`), lásd „Ütemterv” → „Nyitott hiányosságok”, 2. pont. A tervezett tartalom: `DELETE ... WHERE company_id = X` minden `mk_` táblán a megfelelő sorrendben (vagy CASCADE-del), a `<company_id>/` prefixű Storage-objektumok törlése a Storage API-val (nem SQL-lel megy, lásd Migráció), és a céghez tartozó `auth.users` sorok törlése az Admin API-val. A `mk_access_log` bejegyzései nem törlődnek, csak anonimizálódnak (lásd Hozzáférési napló).
 
 ### Migráció: BREMAT mint első cég
 1. Staging Supabase projekten próbafuttatás először.
@@ -260,6 +260,31 @@ Egy `mk_access_log` tábla rögzíti, ki mikor melyik cég adatához fért hozz�
 - **2026. szeptember 18.: éles hiba a licenc mentésénél, javítva.** A Cégek → Licenc mentése *„Cannot coerce the result to a single JSON object"* hibát dobott. Ok: a `loadMe()` szűretlen `.single()`-t hívott az `mk_profiles`-on, ami a második felhasználó felvételétől kezdve két sort kapott (lásd „Felhasználókezelés…" szakasz). A hiba a mostani körnél régebbi (a korábbi `getCompanyId()` ugyanilyen alakú volt), csak egyfelhasználós rendszerben nem derülhetett ki. Javítás: `eq('user_id', …)` + `maybeSingle()` (egy tiszta platform adminnak szándékosan nincs cégprofilja, azt is kezelni kell), és az `afterLogin` már nem nyeli el csendben a profil-betöltés hibáját, hanem látható figyelmeztetést ad. A kereszt-teszt két új ellenőrzéssel bővült: forrás-szintű (a kliens `.single()`/`.maybeSingle()` lekérdezése az `mk_profiles`-on kötelezően szűrjön `user_id`-re) és viselkedési (két felhasználós cégben a saját profil/cég lekérése egyértelmű, és a licenc a rendszergazda útján ténylegesen menthető és megmarad). Mindkét próba „tesztelve a teszt": a forrás-ellenőrzés a hibás kódon elbukik, a javítotton átmegy.
 
 ## Ütemterv
+
+### Nyitott hiányosságok – a végigkattintós próbából (2026. szeptember 18.)
+Ezek nem ötletek, hanem **hiányzó darabok, amiken egy valódi 2. ügyfél elakad**.
+A teljes forgatókönyv: `UJ_UGYFEL_FORGATOKONYV.md`.
+
+1. **A bejelentkezés beégetett `bremat.local` domainje – a KÖVETKEZŐ KÖR ELSŐ TÉTELE.**
+   A kliens minden puszta felhasználónév mögé a `CONFIG.LOGIN_DOMAIN`-t teszi, ami
+   egyetlen, kódba írt érték. Egy másik cég felhasználójának ezért a **teljes e-mail
+   címét** kell beírnia (`iroda@kovacs-femipari-kft.local`) – ezt egy ügyféltől nem
+   lehet elvárni. Ennél rosszabb is van: ha csak `iroda`-t ír be, akkor a **BREMAT
+   fiókjába** próbál belépni, és hibás jelszó helyett akár sikerrel is járhat, ha ott
+   is létezik ilyen nevű felhasználó – vagyis **rossz cég adatait látná**. A
+   `mk_companies.login_domain` oszlop már megvan (004), a hiányzó rész a kliens
+   oldalán van: vagy cég-választó a login képernyőn, vagy a domain kikeresése a
+   beírt névből. Amíg ez nincs meg, **nem adható át a 2. ügyfélnek**.
+
+2. **Cégtörlés sehol nincs – sem a felületen, sem a végponton.** Az `mk-admin.ts`
+   csak `list_companies` / `create_company` / `update_license` műveletet ismer, a
+   Cégek nézetben nincs törlés gomb. Ma ez `db/proba_ceg_torles.sql`-ből megy,
+   kézzel, SQL Editorban (a Storage-fájlokat előtte külön kell törölni). Ez két
+   okból nem tartható: minden próba-ügyfél után SQL-hez kell nyúlni, és
+   ugyanez a funkció kell a **GDPR szerinti végleges törléshez** is (lásd
+   „Adatmegőrzés és törlés a szerződés végén”) – ott a lépéssor már le van írva,
+   csak épp nincs megépítve.
+
 - **Belépő feltétel a próbahét előtt (KÖTELEZŐ, nem halasztható): mentés + visszatöltés kipróbálva.** Mielőtt az első valódi dolgozói adat (valódi dolgozók, PIN-ek, munkaidő, ügyfélrajzok) bekerül az éles rendszerbe, egyszer végig kell csinálni: teljes `pg_dump -Fc` mentés az éles projektről, majd annak **tényleges visszatöltése** egy eldobható/staging projektbe (`pg_restore`), és annak ellenőrzése, hogy a táblák sorszámai egyeznek. A 2026. szeptemberi éles telepítésnél ez tudatosan kimaradt (akkor csak próba-sorok voltak, nem volt mit félteni) – ettől kezdve viszont ez az első teendő, mert innentől van veszíteni való. A pontos parancsok: `db/MIGRATION_RUNBOOK.md` 7. pont.
 - **Következő nagy lépés: a többbérlős átállás** – lásd „Többbérlős SaaS – terv” szakasz, ott van fázisokra bontva (adatmodell+RLS+kereszt-teszt → bejelentkezés/szerepkör-UI → rendszergazda-felület → licenc). Az első fázis (adatmodell+RLS+kereszt-teszt) kész és élesben fut. A második fázis (bejelentkezés/szerepkör) **két PR-ra bontva**: (a) licenc + felhasználókezelés + rendszergazda-felület – ez elkészült, lásd „Állapot”; (b) kétlépcsős azonosítás (TOTP + megbízható eszköz + e-mailes tartalék) – ez még nincs megépítve, és van egy külső függősége: **az e-mailes MFA-tartalékhoz kell egy tranzakciós email-szolgáltatás** (Resend/Postmark) fiók és API kulcs, a Supabase beépített levélküldője erre kevés. A helyszín-korlátozott szerepkör tudatosan NEM része ennek a körnek (lásd „Szerepkörök” a tervben, miért). Ez felülírja/pontosítja az alábbi listát ott, ahol átfedés van (pl. a "szerepkörök" már nem különálló 3. körös ötlet, hanem a többbérlős terv része).
 - **2. kör** (a jelenlegi, egycéges funkciók közül):
