@@ -1232,11 +1232,15 @@ begin;
 alter table public.mk_profiles add column if not exists username      text;
 alter table public.mk_profiles add column if not exists contact_email text;
 
--- A bejelentkezési nevet a kliens e-maillé alakítja egy kitalált domainnel
--- (ma: bremat.local, lásd CLAUDE.md "Biztonság"). Az auth.users e-mail
--- egyedi, tehát két cég azonos felhasználóneve ütközne – ezért a domain
--- cégenkénti. A meglévő (első) cég a mai domaint kapja, így a BREMAT
--- felhasználók UX-e egyáltalán nem változik.
+-- A bejelentkezési cím TÜKRE (005). A kliens az auth.users táblát nem
+-- látja, a Felhasználók listának viszont mutatnia kell, ki melyik címmel
+-- lép be. A forrás mindig az auth.users.email; ez az oszlop szándékosan
+-- kimarad az alábbi oszlop-szintű GRANT-ból, tehát a kliens nem írhatja.
+alter table public.mk_profiles add column if not exists email         text;
+
+-- HASZNÁLATON KÍVÜL a 005 óta: a bejelentkezés e-mail címmel megy, a
+-- kliens nem fűz hozzá domaint. Az oszlop azért marad, mert egy fölösleges
+-- eldobás csak kockázat lenne; új cégnél már nem töltjük ki.
 -- Írni csak service_role tudja: a mk_companies-en a 003 óta oszlop-szintű
 -- GRANT van, és az kizárólag a name oszlopra szól.
 alter table public.mk_companies add column if not exists login_domain text;
@@ -1245,9 +1249,10 @@ update public.mk_companies set login_domain = 'bremat.local'
    and id = (select id from public.mk_companies order by created_at limit 1);
 
 -- Az owner a kollégája szerepkörét és kapcsolattartási e-mailjét írhatja.
--- A username NEM írható a kliensből: az a bejelentkezési azonosító, amit az
--- auth.users sorral együtt kizárólag a szerveroldali (service role) végpont
--- hoz létre – különben a felület és a tényleges bejelentkezési név szétcsúszna.
+-- A username (megjelenítendő név) és az email (a bejelentkezési cím tükre)
+-- NEM írható a kliensből: azokat az auth.users sorral együtt kizárólag a
+-- szerveroldali (service role) végpont állítja – különben a felület és a
+-- tényleges bejelentkezési cím szétcsúszna.
 revoke update on public.mk_profiles from authenticated;
 grant update (role, contact_email) on public.mk_profiles to authenticated;
 
@@ -1616,15 +1621,21 @@ end $$;
 
 
 -- ---------------------------------------------------------------------
--- 5) A MEGLÉVŐ FELHASZNÁLÓK username MEZŐJÉNEK FELTÖLTÉSE
---    A bejelentkezési név az e-mail @ előtti része (lásd CLAUDE.md
---    "Biztonság" → irodai belépés felhasználónévvel).
+-- 5) A MEGLÉVŐ FELHASZNÁLÓK NÉV- ÉS E-MAIL MEZŐJÉNEK FELTÖLTÉSE
+--    A megjelenítendő név alapértelmezésben az e-mail @ előtti része, az
+--    email oszlop pedig az auth.users tükre (005).
 -- ---------------------------------------------------------------------
 update public.mk_profiles p
    set username = split_part(u.email, '@', 1)
   from auth.users u
  where u.id = p.user_id
    and p.username is null;
+
+update public.mk_profiles p
+   set email = u.email
+  from auth.users u
+ where u.id = p.user_id
+   and p.email is distinct from u.email;
 
 commit;
 

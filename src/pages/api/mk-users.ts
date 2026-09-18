@@ -16,13 +16,13 @@ import type { APIRoute } from 'astro';
 import {
     adminAuth,
     adminRest,
-    adminRestJson,
+    badEmail,
     badPassword,
     identifyCaller,
     json,
     loadProfile,
-    serviceKey,
-    usernameToEmail
+    normalizeEmail,
+    serviceKey
 } from '../../lib/mk-supabase';
 
 export const prerender = false;
@@ -62,21 +62,23 @@ export const POST: APIRoute = async ({ request }) => {
 };
 
 async function createUser(key: string, companyId: string, body: any): Promise<Response> {
-    const username = typeof body?.username === 'string' ? body.username.trim() : '';
+    // A bejelentkezési azonosító MAGA az e-mail cím (005). Nincs többé
+    // felhasználónév → kitalált domain átalakítás: az auth.users.email
+    // globálisan egyedi, tehát önmagában megmondja, melyik céghez tartozik a
+    // belépő, és így egy másik cég felhasználója nem tévedhet a BREMAT
+    // fiókjába (lásd CLAUDE.md, a megszűnt "beégetett domain" hiányosság).
+    const email = normalizeEmail(body?.email);
     const password = body?.password;
     const role = body?.role === 'owner' ? 'owner' : 'office';
-    const contactEmail = typeof body?.contact_email === 'string' ? body.contact_email.trim() : '';
+    // A név csak megjelenítésre szolgál; ha nincs megadva, a cím @ előtti része.
+    const name = typeof body?.name === 'string' ? body.name.trim() : '';
 
-    if (!username) return json({ error: 'A felhasználónév kötelező.' }, 400);
+    const emailErr = badEmail(email);
+    if (emailErr) return json({ error: emailErr }, 400);
     const pwErr = badPassword(password);
     if (pwErr) return json({ error: pwErr }, 400);
 
-    const companies = await adminRestJson<any[]>(
-        key,
-        `mk_companies?id=eq.${encodeURIComponent(companyId)}&select=login_domain`
-    );
-    const domain = (companies && companies[0] && companies[0].login_domain) || 'bremat.local';
-    const email = usernameToEmail(username, domain);
+    const username = name || email.split('@')[0];
 
     const createRes = await adminAuth(key, 'admin/users', {
         method: 'POST',
@@ -86,7 +88,7 @@ async function createUser(key: string, companyId: string, body: any): Promise<Re
         const err: any = await createRes.json().catch(() => null);
         const msg = (err && (err.msg || err.message)) || '';
         if (/already/i.test(msg) || createRes.status === 422) {
-            return json({ error: 'Ez a felhasználónév már foglalt.' }, 409);
+            return json({ error: 'Ezzel az e-mail címmel már van fiók.' }, 409);
         }
         return json({ error: 'Nem sikerült létrehozni a fiókot.' }, 500);
     }
@@ -104,7 +106,8 @@ async function createUser(key: string, companyId: string, body: any): Promise<Re
             company_id: companyId,
             role,
             username,
-            contact_email: contactEmail || null
+            email,
+            contact_email: email
         })
     });
     if (!profileRes.ok) {

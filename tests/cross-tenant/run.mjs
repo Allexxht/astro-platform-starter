@@ -186,6 +186,31 @@ if (schemaProblems.length) {
   }
 }
 
+// --- 5c. forrás-ellenőrzés: a bejelentkezés NE fűzzön domaint a beírt névhez ---
+//
+// Korábban a kliens minden puszta felhasználónév mögé egy kódba írt domaint
+// tett (CONFIG.LOGIN_DOMAIN = 'bremat.local'). Ez a 2. ügyfélnél nem csak
+// kényelmetlen lett volna: egy másik cég felhasználója puszta névvel a BREMAT
+// fiókjába próbált volna belépni, és ha ott létezik ilyen nevű fiók, rossz cég
+// adatait láthatta volna. A bejelentkezés azóta e-mail cím + jelszó, ezért a
+// kód NEM tartalmazhat ilyen kiegészítést – forrásból is őrizzük, nehogy
+// visszaszivárogjon.
+{
+  const clientSource = readFileSync(new URL('../../public/munkakovetes/index.html', import.meta.url), 'utf8');
+  const offenders = clientSource
+    .split('\n')
+    .map((line, i) => ({ line: line.trim(), no: i + 1 }))
+    .filter(({ line }) => /LOGIN_DOMAIN/.test(line) || /@\$\{/.test(line) || /\+\s*'@'\s*\+/.test(line));
+  if (offenders.length) {
+    fail(
+      'A kliens a bejelentkezésnél domaint fűz a beírt értékhez (vagy maradt\n' +
+        'LOGIN_DOMAIN hivatkozás). A belépés e-mail címmel megy, a címet nem\n' +
+        'alakítjuk át:\n - ' +
+        offenders.map(({ no, line }) => `${no}. sor: ${line}`).join('\n - ')
+    );
+  }
+}
+
 // --- 6. a tényleges kereszt-bérlős próba: két próba-cég + felhasználó, ---
 //        A cég session-jével B cég adataira/RPC-ire
 await runCrossTenantProbe();
@@ -256,7 +281,7 @@ async function createTestUser(admin, companyId, role) {
   // felvitelekor, ez szándékosan más út, mint amit egy valódi kliens használhatna.
   const { error: profileError } = await admin
     .from('mk_profiles')
-    .insert({ user_id: userData.user.id, company_id: companyId, role });
+    .insert({ user_id: userData.user.id, company_id: companyId, role, email, username: email.split('@')[0] });
   if (profileError) fail(`Nem sikerült próba-profilt létrehozni (${email}): ${profileError.message}`);
 
   return { email, password, id: userData.user.id };
@@ -430,7 +455,7 @@ async function runCrossTenantProbe() {
   const companyA = await createTestFixture(admin, 'Kereszt-teszt A cég', '1357');
   const companyB = await createTestFixture(admin, 'Kereszt-teszt B cég', '2468');
   const userA = await createTestUser(admin, companyA.id, 'owner');
-  await createTestUser(admin, companyB.id, 'owner');
+  const userB = await createTestUser(admin, companyB.id, 'owner');
 
   const clientA = createClient(API_URL, ANON_KEY);
   const { error: signInError } = await clientA.auth.signInWithPassword({
@@ -477,6 +502,49 @@ async function runCrossTenantProbe() {
   // a licenc-mezőhöz nyúlás. Ezért kapnak külön próbát, nem a fenti ciklusban.
   // ---------------------------------------------------------------------
   await runPrivilegeProbes(admin, clientA, companyA, companyB, userA, leaks);
+
+  // ---------------------------------------------------------------------
+  // E-MAILES BEJELENTKEZÉS (005). A belépés azonosítója maga az e-mail cím,
+  // és éppen ez zárja ki, hogy valaki rossz céghez kerüljön: az
+  // auth.users.email globálisan egyedi. Amit itt bizonyítunk:
+  //   • A cég e-mailes session-je B cég egyetlen adatához sem fér hozzá
+  //     (a fenti tábla-ciklus a company_id-ra szűr, ez a felhasználó
+  //     azonosítója, vagyis az e-mail felől közelít ugyanahhoz);
+  //   • B felhasználójának e-mail címe A számára nem látszik.
+  // ---------------------------------------------------------------------
+  const { data: bProfiles } = await clientA.from('mk_profiles').select('user_id,email').eq('user_id', userB.id);
+  if ((bProfiles?.length ?? 0) > 0) {
+    leaks.push('mk_profiles: A cég bejelentkezett felhasználója LÁTJA B cég felhasználójának profilját/e-mail címét');
+  }
+  const { data: visibleEmails } = await clientA.from('mk_profiles').select('email');
+  if ((visibleEmails ?? []).some((r) => r.email === userB.email)) {
+    leaks.push(`mk_profiles: B cég bejelentkezési címe (${userB.email}) látszik A cég felhasználójának`);
+  }
+  const { data: visibleCompanies } = await clientA.from('mk_companies').select('id');
+  if ((visibleCompanies ?? []).some((c) => c.id === companyB.id)) {
+    leaks.push('mk_companies: A cég bejelentkezett felhasználója LÁTJA B cég sorát');
+  }
+
+  // Ugyanaz a jelszó, de B felhasználójának címével: A cég adataihoz ezzel sem
+  // szabad hozzáférni – a session a CÍMHEZ tartozó céget kapja, nem ahhoz, amit
+  // a kliens hisz róla.
+  const clientB = createClient(API_URL, ANON_KEY);
+  const { error: signInBError } = await clientB.auth.signInWithPassword({
+    email: userB.email,
+    password: userB.password,
+  });
+  if (signInBError) {
+    leaks.push('B cég felhasználója nem tudott bejelentkezni a saját e-mail címével: ' + signInBError.message);
+  } else {
+    const { data: aRowsForB } = await clientB.from('mk_employees').select('id').eq('company_id', companyA.id);
+    if ((aRowsForB?.length ?? 0) > 0) {
+      leaks.push('mk_employees: B cég e-mailes session-je LÁTJA A cég dolgozóit');
+    }
+    const { data: bCompany } = await clientB.from('mk_companies').select('id').maybeSingle();
+    if (!bCompany || bCompany.id !== companyB.id) {
+      leaks.push('mk_companies: B cég e-mailes session-je nem a saját cégét kapta vissza (' + JSON.stringify(bCompany) + ')');
+    }
+  }
 
   if (leaks.length) {
     fail('KERESZT-BÉRLŐS SZIVÁRGÁS ÉSZLELVE:\n - ' + leaks.join('\n - '));
