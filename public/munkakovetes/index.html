@@ -3109,8 +3109,17 @@ function openModal({ title, body, actions = [], onMount, onClose }) {
   const modal = backdrop.firstElementChild;
   modal._onClose = onClose || null;
   currentModal = modal;
+  // A háttérre kattintás csak akkor zár, ha az egérgomb LENYOMÁSA is a háttéren
+  // történt. Különben egy mezőben kezdett, az ablakon kívül befejezett
+  // szövegkijelölés is bezárná az ablakot (a böngésző ilyenkor a click-et a
+  // közös szülőnek, vagyis a háttérnek küldi), és a beírt adat elveszne.
+  let downOnBackdrop = false;
+  backdrop.addEventListener('mousedown', ev => { downOnBackdrop = ev.target === backdrop; });
   backdrop.addEventListener('click', async ev => {
-    if (ev.target === backdrop || ev.target.closest('[data-mclose]')) return closeModal(modal);
+    const backdropClick = ev.target === backdrop && downOnBackdrop;
+    downOnBackdrop = false;
+    if (backdropClick || ev.target.closest('[data-mclose]')) return closeModal(modal);
+    if (ev.target === backdrop) return;
     const ab = ev.target.closest('[data-mact]');
     if (!ab || ab.disabled) return;
     const a = actions[Number(ab.dataset.mact)];
