@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#262d33">
-<title>Munkakövetés</title>
+<title>AndonWork</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
@@ -406,11 +406,13 @@ body.kiosk .view{display:flex;flex-direction:column;max-width:none;height:100vh;
 <div id="toast" role="status" aria-live="polite"></div>
 <script>
 /* =====================================================================
-   MUNKAKÖVETÉS – MVP
+   ANDONWORK – munkakövetés gyártóüzemeknek
    Egyfájlos webalkalmazás: irodai nézetek (élő nézet, heti terv,
-   törzsadatok) + a falra szerelt tablet képernyője.
+   törzsadatok, riportok) + a falra szerelt tablet képernyője.
    Irodai link:  .../munkakovetes/
    Tablet link:  .../munkakovetes/?terminal=<tablet azonosító>
+   (Az útvonal szándékosan maradt /munkakovetes/: a tabletek linkjei erre
+   mutatnak, átnevezése minden kioszkot újrakonfigurálást igényelne.)
    ===================================================================== */
 (function () {
 'use strict';
@@ -464,7 +466,7 @@ const fmtDur = min => { min = Math.max(0, Math.round(min || 0)); const h = Math.
 const firstName = name => (name || '').trim().split(/\s+/).slice(-1)[0] || name;
 // Bejelentkezés: a beírt e-mail címet NEM alakítjuk át, csak a felesleges
 // szóközt vesszük le és kisbetűsítünk. Domaint sosem fűzünk hozzá – korábban
-// ez volt a beégetett bremat.local, ami egy másik cég felhasználóját a BREMAT
+// ez volt a beégetett bremat.local, ami egy másik cég felhasználóját az első ügyfél (BREMAT)
 // fiókjába vitte volna (lásd CLAUDE.md).
 const normalizeEmail = raw => String(raw == null ? '' : raw).trim().toLowerCase();
 const isEmail = v => /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/.test(normalizeEmail(v));
@@ -1308,7 +1310,7 @@ function renderShell() {
   if (isPlatformAdmin()) roles.push('rendszergazda');
   const roleLabel = roles.join(' · ');
   bar.innerHTML = `
-    <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Munkakövetés</span></div>
+    <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">AndonWork</span></div>
     <nav class="tabs" aria-label="Fő menü">
       <a href="#live" data-nav="live">Élő nézet <span class="badge" id="alert-badge" hidden></span></a>
       <a href="#plan" data-nav="plan">Heti terv</a>
@@ -2565,7 +2567,7 @@ async function exportReportsExcel() {
     const blob = new Blob([wbout], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `Munkakovetes_riport_${R.from}_${R.to}.xlsx`;
+    a.href = url; a.download = `AndonWork_riport_${R.from}_${R.to}.xlsx`;
     document.body.appendChild(a); a.click();
     setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
     toast('Excel letöltve');
@@ -3162,7 +3164,7 @@ function loginShell(inner) {
   v.className = 'view view-login';
   v.innerHTML = `<section class="login-box">
     <span class="brand-mark big" aria-hidden="true"><i></i><i></i><i></i></span>
-    <h1>Munkakövetés</h1>
+    <h1>AndonWork</h1>
     ${inner}
   </section>`;
   return v;

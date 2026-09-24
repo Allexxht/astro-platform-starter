@@ -1,7 +1,8 @@
-# Többbérlős migráció (003_multitenant) – futtatási útmutató
+# AndonWork – többbérlős migráció (003_multitenant), futtatási útmutató
 
 Ez a dokumentum a `db/migrations/003_multitenant.sql` stagingen, majd éles
-Supabase projekten való futtatásának lépéssora. Lásd még: `CLAUDE.md`
+Supabase projekten való futtatásának lépéssora. Az éles projekt az AndonWork
+termék adatbázisa; ma egyetlen ügyfele a BREMAT (az első cég). Lásd még: `CLAUDE.md`
 „Többbérlős SaaS – terv” → „Migráció: BREMAT mint első cég” és „Kockázatok”.
 
 **Alapszabály: élesben csak akkor futtass bármit, ha a staging végigment
@@ -25,7 +26,7 @@ adaton, valódi Storage-fájlokkal történik, azt a CI nem tudja lemodellezni).
   (Dashboard → Project Settings → Database → Connection string → URI,
   "Direct connection", NEM a pooled). A jelszót csak a terminálban add meg,
   soha ne írd fájlba/chatbe.
-- Ugyanez az **éles** (BREMAT, `nuufcwpbjfimykumufgi`) projekthez.
+- Ugyanez az **éles** (AndonWork, `nuufcwpbjfimykumufgi`) projekthez.
 - `psql` és `pg_dump` telepítve a gépeden (PostgreSQL kliens csomag).
 - A staging projekt **üres** (nincs még séma rajta) – ha korábban futtattál
   rajta bármit, előbb egyeztessünk, mielőtt ez az útmutató épít rá.
@@ -77,7 +78,7 @@ ezt kihagyod, az 5. lépés ellenőrzése nem tud számokkal összehasonlítani.
 
 Mivel az `auth.users`-t nem másoltuk át, a migráció `mk_profiles` backfillje
 üres maradna. Hozz létre 1-2 teszt-felhasználót a staging projekten:
-Dashboard → Authentication → Users → Add user (pl. `teszt@bremat.local`,
+Dashboard → Authentication → Users → Add user (pl. `teszt@example.com`,
 tetszőleges jelszó). Ezek lesznek a migráció után `role='owner'`.
 
 ## 4. A migráció futtatása stagingen
@@ -146,7 +147,7 @@ vissza lehet állni.
 ```bash
 pg_dump "postgresql://postgres:<ÉLES_DB_JELSZÓ>@db.nuufcwpbjfimykumufgi.supabase.co:5432/postgres" \
   --no-owner --no-privileges -Fc \
-  -f bremat_prod_backup_$(date +%Y%m%d_%H%M).dump
+  -f andonwork_prod_backup_$(date +%Y%m%d_%H%M).dump
 ```
 
 Tedd el ezt a fájlt biztonságos, a Supabase-től független helyre (saját
@@ -160,7 +161,7 @@ tölteni belőle** (CLAUDE.md „Kockázatok” 3. pont) – ezt a staging proje
 ```bash
 pg_restore --no-owner --no-privileges --clean --if-exists \
   -d "postgresql://postgres:<CÉLPROJEKT_DB_JELSZÓ>@db.<célprojekt-ref>.supabase.co:5432/postgres" \
-  bremat_prod_backup_20260916_1200.dump
+  andonwork_prod_backup_20260916_1200.dump
 ```
 
 Ha ez sikerrel lefut és a célprojekt táblái/sorai megegyeznek az élessel,
@@ -216,7 +217,7 @@ sok veszíthető adat – ez a gyakorlás arra, amikor lesz:
 ```bash
 pg_dump "postgresql://postgres:<ÉLES_DB_JELSZÓ>@db.nuufcwpbjfimykumufgi.supabase.co:5432/postgres" \
   --no-owner --no-privileges -Fc \
-  -f bremat_prod_backup_before_wipe_$(date +%Y%m%d_%H%M).dump
+  -f andonwork_prod_backup_before_wipe_$(date +%Y%m%d_%H%M).dump
 ```
 
 Ha van rá időd, próbáld vissza is tölteni egy eldobható projektbe (lásd 7.
@@ -303,8 +304,8 @@ select '<a hiányzó user_id a fenti listából>', (select id from public.mk_com
 
 ### 8b.6. Törzsadatok kézi felvétele (~fél óra)
 
-Az irodai felületen (Törzsadatok fül): a friss séma a mai BREMAT-mintájú
-alapadatokkal indul (Hegesztők/Lakatosok/Raktár/Iroda csapatok, 1-es/2-es/
+Az irodai felületen (Törzsadatok fül): a friss séma egy tipikus hegesztőüzem
+mintaadataival indul (Hegesztők/Lakatosok/Raktár/Iroda csapatok, 1-es/2-es/
 3-as csarnok + Raktár + Iroda helyszín, mintafeladatok, 3 tablet, "Teszt
 Elek" dolgozó). Ezeket írd át/bővítsd a valódi adatokra: valódi dolgozók
 (csapattal, PIN-nel), valódi feladatok (helyszín, szín, leírás), a valódi

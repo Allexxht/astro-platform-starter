@@ -1,4 +1,4 @@
-// Munkakövetés – közös szerveroldali segédek a service role-t használó végpontokhoz.
+// AndonWork – közös szerveroldali segédek a service role-t használó végpontokhoz.
 //
 // Miért egy helyen: a CLAUDE.md „Mit kerüljünk el MOST" 2. és 3. pontja szerint a
 // service role kulcs ne legyen több helyre szórva, és a Supabase URL se legyen

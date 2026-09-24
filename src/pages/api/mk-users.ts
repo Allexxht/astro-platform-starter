@@ -1,4 +1,4 @@
-// Munkakövetés – a cég saját felhasználóinak felvétele és törlése (owner jogkör).
+// AndonWork – a cég saját felhasználóinak felvétele és törlése (owner jogkör).
 //
 // Miért kell ehhez szerver: egy bejelentkezési fiók létrehozása és törlése az
 // auth.users táblát érinti, amihez KIZÁRÓLAG a service role kulcs elég – a
