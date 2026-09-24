@@ -164,3 +164,17 @@ begin
          where ev.employee_id = v_emp_id and ev.event_time >= v_from), '[]'::jsonb)
   );
 end $$;
+
+-- ---------------------------------------------------------------------
+-- SÉMA-NYILVÁNTARTÁS (006): ha a nyilvántartás már létezik – vagyis ezt a
+-- migrációt a 006 UTÁN futtatod, mert korábban kimaradt –, jegyezze be
+-- magát, hogy a kliens „le van maradva" figyelmeztetése eltűnjön. Ha még
+-- nincs nyilvántartás, a 006 a nyomai alapján maga pótolja.
+-- ---------------------------------------------------------------------
+do $$
+begin
+  if to_regclass('public.mk_schema_versions') is not null then
+    insert into public.mk_schema_versions (version, name) values (2, '002_attachments')
+    on conflict (version) do nothing;
+  end if;
+end $$;

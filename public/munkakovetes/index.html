@@ -164,6 +164,21 @@ button{cursor:pointer}
   background:rgba(141,107,47,.18);color:var(--chalk);line-height:1.5;max-width:100ch}
 .license-banner strong{color:#e0b661}
 
+/* ===== Lemaradt adatbázis (séma-verzió, 006) ===== */
+/* Szándékosan harsány, és a fejléc FÖLÖTT, a bejelentkező képernyőn is
+   látszik: ez nem egy funkció állapota, hanem hogy a kód és az adatbázis nem
+   illik össze – ilyenkor több funkció csendben hibázhat (lásd a 005 esetét). */
+#schema-alert{position:relative;z-index:30;padding:14px 20px;background:var(--stop-bg);
+  border-bottom:3px solid var(--stop);color:var(--chalk);line-height:1.5}
+#schema-alert h2{margin:0 0 6px;font-family:var(--cond);font-size:22px;letter-spacing:.02em;color:#ffd5d1}
+#schema-alert ol{margin:6px 0;padding-left:24px}
+#schema-alert code{font-size:15px;font-weight:700;color:#fff;background:rgba(0,0,0,.25);padding:1px 6px;border-radius:4px;overflow-wrap:anywhere}
+.schema-list code{overflow-wrap:anywhere}
+#schema-alert p{margin:4px 0;max-width:110ch}
+body.kiosk #schema-alert{display:none}
+.schema-list{margin:8px 0;padding-left:24px;line-height:1.7}
+.schema-list code{font-weight:700}
+
 /* ===== Törzsadatok ===== */
 .subtabs{display:flex;gap:2px;margin-bottom:16px;border-bottom:1px solid var(--line);overflow-x:auto}
 .subtabs button{border:0;border-bottom:3px solid transparent;background:transparent;padding:10px 14px;color:var(--muted);font-weight:600;white-space:nowrap}
@@ -400,6 +415,7 @@ body.kiosk .view{display:flex;flex-direction:column;max-width:none;height:100vh;
 </style>
 </head>
 <body>
+<div id="schema-alert" hidden></div>
 <header class="bar" id="bar" hidden></header>
 <main class="view" id="view"><div class="loading">Betöltés…</div></main>
 <div id="modal-root"></div>
@@ -444,6 +460,26 @@ const CONFIG = {
   ATTACHMENT_SIGNED_URL_SECONDS: 600,
   PDFJS_VERSION: '3.11.174',
 };
+
+/* ---------- Adatbázis-séma: melyik migrációt várja ez a kód ----------
+   Minden db/migrations/NNN_*.sql fájl itt is szerepel. Induláskor a kliens
+   lekéri az adatbázisból (mk_schema_state, 006), melyik futott le, és ha
+   valamelyik hiányzik, harsány figyelmeztetést ad a pontos fájlnevekkel.
+   Az ok: a kódot a Netlify mergeléskor magától kiteszi, a migrációt viszont
+   kézzel kell futtatni – 2026 szeptemberében a 005 így maradt ki élesben, és
+   semmi nem jelezte. ÚJ MIGRÁCIÓNÁL IDE IS FEL KELL VENNI: a kereszt-teszt
+   bukik, ha ez a lista és a db/migrations mappa eltér. */
+const SCHEMA_MIGRATIONS = [
+  { version: 1, file: '001_archive_columns.sql' },
+  { version: 2, file: '002_attachments.sql' },
+  { version: 3, file: '003_multitenant.sql' },
+  { version: 4, file: '004_licenc_felhasznalok.sql' },
+  { version: 5, file: '005_email_login.sql' },
+  { version: 6, file: '006_schema_version.sql' },
+];
+// Ettől a sorszámtól tartja nyilván magát az adatbázis. Ha az mk_schema_state
+// függvény még nem létezik, ezt és az utána következőket biztosan futtatni kell.
+const SCHEMA_TRACKING_SINCE = 6;
 
 /* ---------- Segédfüggvények ---------- */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -647,6 +683,8 @@ function createDemoAdapter() {
       };
     },
     async refreshMe() { return this.me(); },
+    // Demóban nincs adatbázis, tehát nincs mi lemaradjon: minden „lefutott".
+    async schemaState() { return { versions: SCHEMA_MIGRATIONS.map(m => m.version) }; },
     async listUsers() { return demoUsers.map(u => ({ ...u })); },
     async setUserRole(userId, role) {
       if (userId === 'u-demo') throw new Error('Nem sikerült módosítani (csak tulajdonos módosíthat, és saját magát nem).');
@@ -1105,6 +1143,15 @@ async function createSupabaseAdapter() {
     mode: 'live',
     async me() { return loadMe(); },
     async refreshMe() { meCache = null; return loadMe(); },
+    // Melyik migráció futott le (006). Bejelentkezés nélkül is hívható, hogy a
+    // bejelentkező képernyő már jelezze a lemaradást. versions: null = a
+    // nyilvántartás maga sincs meg, vagyis a 006 még nem futott le.
+    async schemaState() {
+      const { data, error } = await sb.rpc('mk_schema_state');
+      if (!error) return { versions: Array.isArray(data) ? data.map(Number) : [] };
+      if (error.code === 'PGRST202' || /Could not find the function/i.test(error.message || '')) return { versions: null };
+      throw new Error(error.message);
+    },
     async listUsers() {
       return q(sb.from(T('profiles')).select('user_id,role,username,email,contact_email,created_at').order('email'));
     },
@@ -1264,6 +1311,7 @@ const S = {
   admin: { tab: 'employees' },
   me: null,                    // profil + cég + licenc-állapot (lásd api.me())
   meError: null,               // ha a profil betöltése hibázik, NE csendben nyeljük el
+  schema: null,                // az adatbázis séma-állapota (006): { tracked, versions, missing }
   users: [],                   // a cég felhasználói (Törzsadatok → Felhasználók)
   companies: [],               // rendszergazda-nézet: az összes cég
   reports: (() => {
@@ -2005,11 +2053,23 @@ function companyDeleteModal(companyId, companyName) {
 }
 
 /* ---------- CÉGEK (csak rendszergazdának) ---------- */
+// Az adatbázis séma-állapota a Cégek nézetben: itt akkor is látszik, ha
+// minden rendben van, hogy a rendszergazda egy pillantással ellenőrizhesse.
+function schemaStatusLine() {
+  if (!S.schema) return '<p class="muted small">Adatbázis-séma: az állapot nem kérdezhető le (hálózati hiba?).</p>';
+  const last = SCHEMA_MIGRATIONS[SCHEMA_MIGRATIONS.length - 1];
+  if (!schemaBehind()) {
+    return `<p class="muted small">Adatbázis-séma: rendben – a program által várt összes migráció lefutott (utolsó: <code>${esc(last.file)}</code>).</p>`;
+  }
+  return `<p class="form-err">Adatbázis-séma: le van maradva, hiányzik: ${S.schema.missing.map(m => `<code>${esc(m.file)}</code>`).join(', ')} – lásd a figyelmeztetést az oldal tetején.</p>`;
+}
+
 function renderCompanies() {
   $('#view').innerHTML = `<section class="admin">
     <div class="toolbar"><h1 class="view-title">Cégek</h1></div>
     <div class="admin-head"><p class="muted">Rendszergazda-nézet: az összes ügyfélcég és a licencük. A cégek napi adatait (dolgozók, munkaidő, riportok) ez a nézet szándékosan nem mutatja – a rendszergazdának nincs rálátása egy cég üzleti adataira.</p>
       <button class="btn btn-primary" data-act="company-new">Új cég</button></div>
+    ${schemaStatusLine()}
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Cég</th><th>Felhasználók</th><th>Használat</th><th>Licenc</th><th></th></tr></thead><tbody>
     ${S.companies.map((c, i) => {
       const expired = c.active === false || (c.license_expires_at && new Date(c.license_expires_at) < new Date());
@@ -3212,7 +3272,9 @@ function renderLogin(err, email) {
   $('#l-go').onclick = submit;
   $('#l-forgot').onclick = () => renderForgot(null, $('#l-user').value);
   $('#l-pass').onkeydown = e => { if (e.key === 'Enter') submit(); };
-  $('#l-user').focus();
+  // preventScroll: telefonon a fókusz különben legörgetne, és a fölötte lévő
+  // „le van maradva" sáv (#schema-alert) kicsúszna a képből.
+  $('#l-user').focus({ preventScroll: true });
 }
 
 /* Jelszó-visszaállítás kérése. A visszajelzés szándékosan mindig ugyanaz,
@@ -3443,6 +3505,58 @@ function onRemoteChange(what) {
   }, 300);
 }
 
+/* ---------- Adatbázis-séma ellenőrzése (006) ----------
+   A kód és az adatbázis összeillik-e: minden migráció, amit a kód vár
+   (SCHEMA_MIGRATIONS), lefutott-e ezen az adatbázison. A teljes listát
+   vetjük össze, nem a legmagasabb számot – így egy kihagyott köztes
+   migráció is látszik. Ha az adatbázis ELŐRÉBB jár a kódnál (a migráció már
+   lefutott, a deploy még nem), az a helyes sorrend része, nem hiba.
+   Hálózati hibánál nem riasztunk: abból nem derül ki, hogy a séma lemaradt. */
+async function checkSchema() {
+  if (!S.api || !S.api.schemaState) return null;
+  let st;
+  try { st = await S.api.schemaState(); }
+  catch (e) { console.warn('Séma-ellenőrzés nem sikerült', e); return null; }
+  if (st.versions === null) {
+    return { tracked: false, missing: SCHEMA_MIGRATIONS.filter(m => m.version >= SCHEMA_TRACKING_SINCE) };
+  }
+  const have = new Set(st.versions);
+  return { tracked: true, versions: st.versions, missing: SCHEMA_MIGRATIONS.filter(m => !have.has(m.version)) };
+}
+
+const schemaBehind = () => Boolean(S.schema && S.schema.missing.length);
+
+function schemaFilesHtml() {
+  return `<ol>${S.schema.missing.map(m => `<li><code>db/migrations/${esc(m.file)}</code></li>`).join('')}</ol>`;
+}
+
+function renderSchemaAlert() {
+  const box = $('#schema-alert');
+  if (!schemaBehind()) { box.hidden = true; box.innerHTML = ''; return; }
+  const n = S.schema.missing.length;
+  box.hidden = false;
+  box.setAttribute('role', 'alert');
+  box.innerHTML = `<h2>Az adatbázis le van maradva a programhoz képest</h2>
+    <p>A program egy újabb adatbázis-változatra számít, mint ami ezen az adatbázison fut. Amíg ${n === 1 ? 'ez a fájl nincs' : 'ezek a fájlok nincsenek'} lefuttatva, több funkció csendben hibázhat (pl. rajzfeltöltés, felhasználókezelés, Cégek nézet).
+    Futtasd le ${n === 1 ? 'ezt a fájlt' : 'ezeket a fájlokat, ebben a sorrendben'} a Supabase Dashboard → SQL Editor → New query → beillesztés → Run lépéssel:</p>
+    ${schemaFilesHtml()}
+    ${S.schema.tracked ? '' : '<p>Az adatbázis még nem tartja nyilván, melyik migráció futott le rajta. A 006 ezt pótolja, és ha utána még valami hiányzik, ez a sáv pontosan megnevezi.</p>'}
+    <p>Utána töltsd újra ezt az oldalt – ha minden lefutott, a figyelmeztetés eltűnik. Ha nem te kezeled az adatbázist, küldd tovább ezt a listát a rendszergazdának.</p>`;
+}
+
+// Egyszer, betöltéskor egy ablak is feljön: a sáv önmagában egy ismerős
+// oldalon könnyen „vakfolt" lesz.
+function schemaAlertModal() {
+  if (!schemaBehind()) return;
+  openModal({
+    title: 'Az adatbázis le van maradva',
+    body: `<p>Ezen az adatbázison még nem futott le ${S.schema.missing.length === 1 ? 'ez a migráció' : 'ez a(z) ' + S.schema.missing.length + ' migráció'}:</p>
+      <ol class="schema-list">${S.schema.missing.map(m => `<li><code>db/migrations/${esc(m.file)}</code></li>`).join('')}</ol>
+      <p class="muted small">Supabase Dashboard → SQL Editor → New query → beillesztés → Run, a fenti sorrendben. A figyelmeztetés az oldal tetején addig marad, amíg mindegyik le nem futott.</p>`,
+    actions: [{ label: 'Értem', primary: true }],
+  });
+}
+
 /* ---------- Indítás ---------- */
 async function afterLogin() {
   // A profil/licenc állapotot a keret kirajzolása ELŐTT kell tudni: ebből dől el,
@@ -3496,11 +3610,17 @@ async function boot() {
     await startTerminal(terminalId, v);
     return;
   }
+  // A séma-ellenőrzés a bejelentkezés ELŐTT fut: a lemaradás a bejelentkező
+  // képernyőn is látszódjon (a tableten nem – ott a dolgozó nem tud vele mit
+  // kezdeni, a kioszk ág fentebb már visszatért).
+  S.schema = await checkSchema();
+  renderSchemaAlert();
   if (S.api.onPasswordRecovery) S.api.onPasswordRecovery(() => renderNewPassword());
   S.session = await S.api.getSession();
   if (recoveryHint) return renderNewPassword();
-  if (!S.session) return renderLogin();
+  if (!S.session) { renderLogin(); schemaAlertModal(); return; }
   await afterLogin();
+  schemaAlertModal();
 }
 
 boot();

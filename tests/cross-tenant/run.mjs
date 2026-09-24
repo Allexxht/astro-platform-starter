@@ -23,7 +23,7 @@
 //      bármelyik átmegy, BUKÁS.
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { TENANT_TABLES, TENANT_RPCS } from './manifest.mjs';
 
 function fail(message) {
@@ -207,6 +207,82 @@ if (schemaProblems.length) {
         'LOGIN_DOMAIN hivatkozás). A belépés e-mail címmel megy, a címet nem\n' +
         'alakítjuk át:\n - ' +
         offenders.map(({ no, line }) => `${no}. sor: ${line}`).join('\n - ')
+    );
+  }
+}
+
+// --- 5d. séma-nyilvántartás (006): a kód, a migrációk és a setup egyezzen ---
+//
+// 2026. szeptember 24-én kiderült, hogy a 005 kódja már élesben futott, a
+// migrációja viszont nem – és semmi nem jelezte. Azóta a kliens induláskor
+// összeveti, milyen migrációt vár (SCHEMA_MIGRATIONS az index.html-ben) azzal,
+// ami az adatbázisban nyilvántartva van (mk_schema_state()). Ez csak akkor ér
+// valamit, ha a három hely – a kliens listája, a db/migrations mappa és a
+// supabase-setup.sql – nem csúszik el egymástól, és minden migráció
+// bejegyzi magát. Ezt itt forrásból ellenőrizzük, mert a hiba tünete (a
+// figyelmeztetés hiányzik vagy tévesen jelez) csak élesben látszana.
+{
+  const readRepo = rel => readFileSync(new URL('../../' + rel, import.meta.url), 'utf8');
+  const clientSource = readRepo('public/munkakovetes/index.html');
+  const setupSource = readRepo('db/supabase-setup.sql');
+  const migrationFiles = readdirSync(new URL('../../db/migrations/', import.meta.url))
+    .filter(f => /^\d{3}_.+\.sql$/.test(f)).sort();
+  const rollbackFiles = new Set(readdirSync(new URL('../../db/migrations/rollback/', import.meta.url)));
+  const problems = [];
+
+  const listMatch = clientSource.match(/const SCHEMA_MIGRATIONS = \[([\s\S]*?)\];/);
+  if (!listMatch) {
+    fail('Nem találom a kliensben a SCHEMA_MIGRATIONS listát – változott a kód szerkezete, nézd át ezt az ellenőrzést.');
+  }
+  const clientList = [...listMatch[1].matchAll(/\{\s*version:\s*(\d+),\s*file:\s*'([^']+)'\s*\}/g)]
+    .map(m => ({ version: Number(m[1]), file: m[2] }));
+  const clientFiles = clientList.map(m => m.file).join(', ');
+  if (clientFiles !== migrationFiles.join(', ')) {
+    problems.push(
+      'A kliens SCHEMA_MIGRATIONS listája nem egyezik a db/migrations mappával.\n' +
+        `     kliens:  ${clientFiles || '(üres)'}\n     mappa:   ${migrationFiles.join(', ')}`
+    );
+  }
+  for (const m of clientList) {
+    if (Number(m.file.slice(0, 3)) !== m.version) problems.push(`A kliens listájában a(z) ${m.file} sorszáma hibás (${m.version}).`);
+  }
+
+  for (const file of migrationFiles) {
+    const version = Number(file.slice(0, 3));
+    const name = file.replace(/\.sql$/, '');
+    const entry = new RegExp(`\\(\\s*${version}\\s*,\\s*'${name}'\\s*\\)`);
+    const src = readRepo('db/migrations/' + file);
+    if (!/mk_schema_versions/.test(src) || !entry.test(src)) {
+      problems.push(`A(z) ${file} nem jegyzi be magát az mk_schema_versions táblába (várt bejegyzés: (${version}, '${name}')).`);
+    }
+    if (!entry.test(setupSource)) {
+      problems.push(`A db/supabase-setup.sql séma-nyilvántartás szakaszából hiányzik: (${version}, '${name}').`);
+    }
+    const rb = `${name}_rollback.sql`;
+    if (rollbackFiles.has(rb) && !/mk_schema_versions/.test(readRepo('db/migrations/rollback/' + rb))) {
+      problems.push(`A(z) rollback/${rb} nem veszi ki a(z) ${version}. migrációt az mk_schema_versions táblából.`);
+    }
+  }
+
+  // Az adatbázis maga: a setup + az összes migráció után minden várt sorszám
+  // nyilvántartva van.
+  let dbState;
+  try {
+    dbState = psql('select array_to_string(public.mk_schema_state(), \',\')');
+  } catch (err) {
+    dbState = `hiba: ${String(err.message).split('\n').find(l => /ERROR/.test(l)) || err.message}`;
+  }
+  const expected = clientList.map(m => m.version).join(',');
+  if (dbState !== expected) {
+    problems.push(`Az mk_schema_state() a setup + minden migráció után ezt adja: {${dbState}}, a kliens ezt várja: {${expected}}.`);
+  }
+
+  if (problems.length) {
+    fail(
+      'A séma-nyilvántartás (006) nem egyezik a kóddal – a kliens „le van maradva" figyelmeztetése\n' +
+        'így tévesen jelezne vagy hallgatna. Új migrációnál: a fájl jegyezze be magát, a rollbackje\n' +
+        'vegye ki, és kerüljön be a kliens SCHEMA_MIGRATIONS listájába és a supabase-setup.sql-be.\n - ' +
+        problems.join('\n - ')
     );
   }
 }
@@ -581,6 +657,19 @@ async function runCrossTenantProbe() {
       if ((rows?.length ?? 0) > 0) leaks.push(`profil nélküli rendszergazda: LÁTJA a(z) ${c.name} dolgozóit`);
     }
     await admin.auth.admin.deleteUser(adminId).catch(() => null);
+  }
+
+  // Séma-nyilvántartás (006): a bejelentkező képernyő bejelentkezés NÉLKÜL
+  // kérdezi le – anon kulccsal hívhatónak kell lennie, és csak sorszámokat
+  // adhat; magát a táblát anon közvetlenül nem olvashatja.
+  {
+    const anonClient = createClient(API_URL, ANON_KEY);
+    const { data: state, error: stateErr } = await anonClient.rpc('mk_schema_state');
+    if (stateErr || !Array.isArray(state) || state.length === 0) {
+      fail('Az mk_schema_state() bejelentkezés nélkül nem hívható, vagy üres listát ad: ' + (stateErr ? stateErr.message : JSON.stringify(state)));
+    }
+    const { data: rawRows } = await anonClient.from('mk_schema_versions').select('version');
+    if ((rawRows?.length ?? 0) > 0) leaks.push('anon közvetlenül olvassa az mk_schema_versions táblát');
   }
 
   if (leaks.length) {

@@ -431,6 +431,15 @@ drop table if exists public.mk_companies;
 drop function if exists public.mk_current_company();
 drop function if exists public.mk_is_owner();
 
+-- A séma-nyilvántartásból (006) is kivesszük, hogy a kliens jelezze: ez a
+-- migráció most nincs érvényben ezen az adatbázison.
+do $$
+begin
+  if to_regclass('public.mk_schema_versions') is not null then
+    delete from public.mk_schema_versions where version = 3;
+  end if;
+end $$;
+
 commit;
 
 select 'ROLLBACK KÉSZ' as done;

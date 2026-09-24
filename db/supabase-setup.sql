@@ -1641,6 +1641,48 @@ commit;
 
 
 -- ---------------------------------------------------------------------
+-- 8b) SÉMA-NYILVÁNTARTÁS (006) – melyik migráció van érvényben
+--    A kliens induláskor az mk_schema_state() függvényből kérdezi le, és
+--    ha a kódhoz képest valami hiányzik, harsány figyelmeztetést ad a
+--    futtatandó fájlok nevével (lásd CLAUDE.md „Munkamódszer" → sorrend).
+--    Ez a fájl az összes migráció tartalmát magában foglalja, ezért itt
+--    mindegyik bejegyzés feltétel nélkül bekerül. ÚJ MIGRÁCIÓNÁL IDE IS
+--    FEL KELL VENNI – a kereszt-teszt ellenőrzi.
+-- ---------------------------------------------------------------------
+begin;
+
+create table if not exists public.mk_schema_versions (
+  version     integer primary key,
+  name        text not null,
+  applied_at  timestamptz not null default now()
+);
+alter table public.mk_schema_versions enable row level security;
+
+create or replace function public.mk_schema_state()
+returns integer[]
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(array_agg(version order by version), '{}') from public.mk_schema_versions;
+$$;
+revoke all on function public.mk_schema_state() from public;
+grant execute on function public.mk_schema_state() to anon, authenticated;
+
+insert into public.mk_schema_versions (version, name) values
+  (1, '001_archive_columns'),
+  (2, '002_attachments'),
+  (3, '003_multitenant'),
+  (4, '004_licenc_felhasznalok'),
+  (5, '005_email_login'),
+  (6, '006_schema_version')
+on conflict (version) do nothing;
+
+commit;
+
+
+-- ---------------------------------------------------------------------
 -- 9) KEZDŐ ADATOK – nyugodtan írd át őket a Törzsadatok oldalon
 --    (a company_id mindenhol explicit, mert ez a szakasz a 7) után fut,
 --    tehát a mk_set_company_id_trg trigger már fel van kötve, és ebben a
