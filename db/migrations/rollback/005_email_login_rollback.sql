@@ -27,4 +27,13 @@ alter table public.mk_profiles drop column if exists email;
 revoke update on public.mk_profiles from authenticated;
 grant update (role, contact_email) on public.mk_profiles to authenticated;
 
+-- A séma-nyilvántartásból (006) is kivesszük, hogy a kliens jelezze: ez a
+-- migráció most nincs érvényben ezen az adatbázison.
+do $$
+begin
+  if to_regclass('public.mk_schema_versions') is not null then
+    delete from public.mk_schema_versions where version = 5;
+  end if;
+end $$;
+
 commit;

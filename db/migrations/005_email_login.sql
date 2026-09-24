@@ -60,4 +60,18 @@ update public.mk_profiles p
  where u.id = p.user_id
    and p.email is distinct from u.email;
 
+-- ---------------------------------------------------------------------
+-- SÉMA-NYILVÁNTARTÁS (006): ha a nyilvántartás már létezik – vagyis ezt a
+-- migrációt a 006 UTÁN futtatod, mert korábban kimaradt –, jegyezze be
+-- magát, hogy a kliens „le van maradva" figyelmeztetése eltűnjön. Ha még
+-- nincs nyilvántartás, a 006 a nyomai alapján maga pótolja.
+-- ---------------------------------------------------------------------
+do $$
+begin
+  if to_regclass('public.mk_schema_versions') is not null then
+    insert into public.mk_schema_versions (version, name) values (5, '005_email_login')
+    on conflict (version) do nothing;
+  end if;
+end $$;
+
 commit;
