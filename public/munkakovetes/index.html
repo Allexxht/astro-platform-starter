@@ -25,6 +25,12 @@
   --stop-bg:#3b2523;
   --font:'Barlow',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
   --cond:'Barlow Condensed','Barlow',system-ui,sans-serif;
+  /* Mozgás: minden animáció 150–250 ms (a JS MOTION ugyanezeket használja) */
+  --t-fast:150ms;     /* hover, aktív állapot, eltűnés */
+  --t-base:200ms;     /* megjelenés: ablak, nézet, chip, toast */
+  --t-slow:250ms;     /* élő nézet: állapotváltás, új sor, átrendeződés */
+  --ease-out:cubic-bezier(.2,.8,.2,1);
+  --ease-in:cubic-bezier(.4,0,1,1);
   color-scheme:dark;
 }
 *{box-sizing:border-box}
@@ -241,8 +247,9 @@ body.kiosk #schema-alert{display:none}
 .swatch-pick.is-on{border-color:var(--chalk)}
 input[type=color]{width:44px;height:32px;padding:0;border:1px solid var(--line);border-radius:6px;background:transparent}
 #toast{position:fixed;left:50%;bottom:24px;z-index:60;padding:10px 16px;border-radius:10px;background:var(--chalk);color:var(--bg);font-weight:600;
-  opacity:0;pointer-events:none;transform:translate(-50%,16px);transition:opacity .2s,transform .2s}
-#toast.show{opacity:1;transform:translate(-50%,0)}
+  opacity:0;pointer-events:none;transform:translate(-50%,20px);
+  transition:opacity var(--t-fast) var(--ease-in),transform var(--t-fast) var(--ease-in)}
+#toast.show{opacity:1;transform:translate(-50%,0);transition-duration:var(--t-base);transition-timing-function:var(--ease-out)}
 
 /* ===== Bejelentkezés ===== */
 .view-login{display:grid;place-items:center;min-height:100vh}
@@ -370,6 +377,42 @@ input[type=color]{width:44px;height:32px;padding:0;border:1px solid var(--line);
 /* Kioszk mód: a tablet csak a terminált mutatja */
 body.kiosk .bar{display:none}
 body.kiosk .view{display:flex;flex-direction:column;max-width:none;height:100vh;height:100dvh;padding:0}
+
+/* ===== Mozgás – csak az irodai felület =====
+   Minden 150–250 ms: ami ennél lassabb, az már útban van. Rugózás, pattanás
+   nincs, csak halk be- és kiúszás. A tablet (.term, t-*) szándékosan kimarad:
+   ott a gombnyomás visszajelzése azonnali, egy dolgozónak kesztyűben, sietve
+   minden késleltetés akadály. Mozgáscsökkentésnél (prefers-reduced-motion) a
+   lenti @media szabály mindezt kikapcsolja; a JS-ből indított animációkat a
+   motionOK() kapcsolja ki. */
+.btn,.tabs a,.subtabs button,.seg button,.icon-btn,.tp-item,.swatch-pick,.chip-x,.cell-add{
+  transition:background-color var(--t-fast) ease,border-color var(--t-fast) ease,color var(--t-fast) ease,
+    filter var(--t-fast) ease,opacity var(--t-fast) ease,transform var(--t-fast) ease}
+.btn:not(:disabled):active{transform:translateY(1px)}
+.subtabs button:hover,.seg button:hover,.chip-x:hover{color:var(--chalk)}
+.icon-btn:hover{color:var(--chalk);background:var(--raised)}
+.cell-add:hover{color:var(--chalk);border-color:var(--muted)}
+/* A chip és a sor mozgását (be-, kiúszás, átrendeződés) JS indítja – ide csak a hover kell. */
+.chip{transition:filter var(--t-fast) ease}
+.chip:hover{filter:brightness(1.1)}
+.row,.tbl tbody td{transition:background-color var(--t-fast) ease}
+.row:hover,.tbl tbody tr:hover td{background-color:rgba(236,238,232,.03)}
+@keyframes mk-fade{from{opacity:0}}
+@keyframes mk-fade-out{to{opacity:0}}
+@keyframes mk-rise{from{opacity:0;transform:translateY(8px) scale(.985)}}
+@keyframes mk-sink{to{opacity:0;transform:translateY(4px) scale(.985)}}
+/* Nézetváltás, alfül, lenyitott napló: rövid áttűnés */
+.fade-in{animation:mk-fade var(--t-base) var(--ease-out)}
+/* A „Betöltés…” csak akkor jelenik meg, ha a betöltés tényleg eltart egy
+   darabig – gyors betöltésnél ne villanjon fel a tartalom előtt. */
+.loading.is-late{animation:mk-fade var(--t-base) var(--ease-out) var(--t-slow) both}
+/* Felugró ablak: halk megjelenés és eltűnés. Ablakról ablakra váltáskor
+   (is-handoff) a háttér nem úszik be újra, különben egy pillanatra kivilágosodna. */
+.backdrop{animation:mk-fade var(--t-base) var(--ease-out)}
+.backdrop .modal{animation:mk-rise var(--t-base) var(--ease-out)}
+.backdrop.is-handoff{animation:none}
+.backdrop.is-leaving{animation:mk-fade-out var(--t-fast) var(--ease-in) forwards;pointer-events:none}
+.backdrop.is-leaving .modal{animation:mk-sink var(--t-fast) var(--ease-in) forwards}
 
 /* ===== Reszponzív ===== */
 @container (max-width:640px){
@@ -1328,6 +1371,30 @@ const M = () => ({
 const reloadMaster = async () => { S.master = await S.api.loadMaster(); };
 const errorBox = e => `<div class="empty"><p>Hiba történt: ${esc(e && e.message || e)}</p><button class="btn" data-act="retry">Újrapróbálás</button></div>`;
 
+/* ---------- Mozgás ----------
+   Minden animáció 150–250 ms, csak az irodai felületen (a CSS „Mozgás”
+   szakaszával és a --t-* tokenekkel egyezően). A tablet szándékosan kimarad:
+   kioszk módban és az irodai Tablet fülön semmi nem mozog, ott a gombnyomás
+   visszajelzése azonnali. Mozgáscsökkentésnél (prefers-reduced-motion) sem: a
+   CSS-animációkat a @media szabály kapcsolja ki, a JS-ből (Web Animations
+   API) indítottakat ez a motionOK() – azokra a CSS-szabály nem hat. */
+const MOTION = { fast: 150, base: 200, slow: 250 };
+const EASE_OUT = 'cubic-bezier(.2,.8,.2,1)';
+const EASE_IN = 'cubic-bezier(.4,0,1,1)';
+const reducedMotion = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+const motionOK = () => !S.kiosk && !(reducedMotion && reducedMotion.matches);
+
+// Egy CSS-animáció újraindítása osztállyal (pl. nézetváltáskor a beúszás).
+function playClass(el, cls) {
+  if (!el || !motionOK()) return;
+  el.classList.remove(cls);
+  void el.offsetWidth;          // enélkül az azonnal visszatett osztály nem indítaná újra
+  el.classList.add(cls);
+}
+
+// Web Animations API; mozgáscsökkentésnél és régi böngészőben nem csinál semmit.
+const animateEl = (el, keyframes, opts) => (el && el.animate && motionOK() ? el.animate(keyframes, opts) : null);
+
 /* ---------- Keret és navigáció ---------- */
 const VIEWS = ['live', 'plan', 'admin', 'reports', 'terminal', 'companies'];
 
@@ -1405,7 +1472,10 @@ async function go(view) {
   stopTerminalTimers();
   const v = $('#view');
   v.className = 'view view-' + view;
-  v.innerHTML = '<div class="loading">Betöltés…</div>';
+  // Nézetváltáskor rövid áttűnés – a Tablet fül kivétel: az a tablet
+  // képernyője, ott semmi nem késleltethet (lásd „Mozgás”).
+  const fade = view !== 'terminal';
+  v.innerHTML = `<div class="loading${fade ? ' is-late' : ''}">Betöltés…</div>`;
   try {
     if (view === 'live') { await loadLive(); renderLive(); }
     else if (view === 'plan') { await loadPlan(); renderPlan(); }
@@ -1414,6 +1484,7 @@ async function go(view) {
     else if (view === 'companies') { S.companies = await S.api.listCompanies(); renderCompanies(); }
     else await renderTerminalTab();
   } catch (e) { v.innerHTML = errorBox(e); }
+  if (fade) playClass(v, 'fade-in');
 }
 
 /* ---------- ÉLŐ NÉZET ---------- */
@@ -1474,7 +1545,8 @@ function renderLive() {
   const keys = [...groups.keys()].sort((a, b) => rank(a) - rank(b));
 
   const chip = (cls, label, n) => `<span class="count ${cls}"><i></i>${label} <b>${n}</b></span>`;
-  $('#view').innerHTML = `<section class="live">
+  const prev = captureLive();
+  $('#view').innerHTML = `<section class="live" data-date="${S.live.date}" data-group="${S.live.group}">
     <div class="toolbar">
       <div class="datenav">
         <button class="btn icon" data-act="live-prev" aria-label="Előző nap">‹</button>
@@ -1492,12 +1564,72 @@ function renderLive() {
       <b>${blocked.length === 1 ? 'Elakadás' : blocked.length + ' elakadás'}</b>
       <ul>${blocked.map(r => `<li>${esc(r.e.name)}: ${esc(r.st.blockReason || 'ok nélkül')}, ${fmtTime(r.st.since)} óta${m.task[r.st.taskId] ? ` (${esc(m.task[r.st.taskId].name)})` : ''}</li>`).join('')}</ul>
     </div></div>` : ''}
-    <div class="counts">${chip('st-work', 'Dolgozik', counts.work)}${chip('st-pause', 'Szünet', counts.pause)}${chip('st-block', 'Elakadt', counts.block)}${chip('st-done', 'Végzett', counts.done)}${chip('st-off', 'Nem jelentkezett be', counts.off)}</div>
-    ${unclosed.length ? `<p class="warn-line">${unclosed.length} dolgozó nem zárta le a műszakját ezen a napon. Nyisd le a naplóját, és rögzítsd, mikor ment el.</p>` : ''}
+    <div class="counts" data-flip="counts">${chip('st-work', 'Dolgozik', counts.work)}${chip('st-pause', 'Szünet', counts.pause)}${chip('st-block', 'Elakadt', counts.block)}${chip('st-done', 'Végzett', counts.done)}${chip('st-off', 'Nem jelentkezett be', counts.off)}</div>
+    ${unclosed.length ? `<p class="warn-line" data-flip="warn">${unclosed.length} dolgozó nem zárta le a műszakját ezen a napon. Nyisd le a naplóját, és rögzítsd, mikor ment el.</p>` : ''}
     ${rows.length ? '' : `<div class="empty"><p>${isToday ? 'Ma még senki nem jelentkezett be, és nincs beosztás.' : 'Erre a napra nincs adat.'}</p>${isToday ? '<a class="btn" href="#plan">Heti terv megnyitása</a>' : ''}</div>`}
     ${keys.map(k => liveGroup(k, groups.get(k), m, isToday)).join('')}
     ${absent.length ? liveGroup('_absent', absent, m, isToday) : ''}
   </section>`;
+  animateLive(prev);
+}
+
+/* Élő nézet mozgása. Újrarajzoláskor (Realtime, lezárás, 30 mp-es frissítés,
+   napló lenyitása) a lista egésze újraépül, így a CSS-átmenet magától nem
+   hatna. Ezért rajzolás előtt feljegyezzük, ki milyen állapotban és hol volt,
+   utána pedig onnan visszük át az újba: a jelzőfény és az állapotszöveg színe
+   átúszik (pl. zöldről pirosra), az átrendeződő sorok (az elakadt dolgozó a
+   csoportja elejére kerül) a helyükre csúsznak, az új sor röviden bevillan.
+   Nézetváltáskor, napváltáskor és csoportosítás-váltáskor nincs mihez mérni,
+   ott semmi nem mozog. */
+function captureLive() {
+  if (!motionOK()) return null;
+  const sec = $('#view > .live');
+  if (!sec || sec.dataset.date !== S.live.date || sec.dataset.group !== S.live.group) return null;
+  const pos = new Map();
+  $$('[data-flip]', sec).forEach(el => pos.set(el.dataset.flip, el.getBoundingClientRect().top));
+  const rows = new Map();
+  $$('.row[data-emp]', sec).forEach(row => {
+    const label = $('.who .state', row);
+    rows.set(row.dataset.emp, {
+      state: row.dataset.state,
+      lights: $$('.stack i', row).map(i => { const cs = getComputedStyle(i); return { backgroundColor: cs.backgroundColor, boxShadow: cs.boxShadow }; }),
+      label: label ? getComputedStyle(label).color : null,
+    });
+  });
+  return { pos, rows, alert: Boolean($('.alert', sec)) };
+}
+
+function animateLive(prev) {
+  const sec = prev && $('#view > .live');
+  if (!sec) return;
+  const slow = { duration: MOTION.slow, easing: 'ease-in-out' };
+  // Előbb minden pozíciót kiolvasunk, csak utána indítunk animációt – így egyetlen újratördelés elég.
+  const moves = $$('[data-flip]', sec).map(el => {
+    const was = prev.pos.get(el.dataset.flip);
+    return { el, dy: was === undefined ? 0 : was - el.getBoundingClientRect().top };
+  });
+  moves.forEach(({ el, dy }) => {
+    if (Math.abs(dy) >= 1) animateEl(el, [{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: MOTION.slow, easing: EASE_OUT });
+  });
+  if (!prev.alert) animateEl($('.alert', sec), [{ opacity: 0 }, { opacity: 1 }], { duration: MOTION.base, easing: EASE_OUT });
+  $$('.row[data-emp]', sec).forEach(row => {
+    const was = prev.rows.get(row.dataset.emp);
+    if (!was) {
+      // Új sor: rövid bevillanás az izzó narancs árnyalatával. Andon színt
+      // szándékosan nem: a zöld, sárga, piros csak a munkaállapotot jelöli.
+      const glow = 'rgba(255,122,26,.24)';
+      animateEl(row, [{ backgroundColor: glow }, { backgroundColor: glow, offset: 0.3 }, { backgroundColor: 'rgba(255,122,26,0)' }], { duration: MOTION.slow, easing: 'ease-out' });
+      return;
+    }
+    if (was.state === row.dataset.state) return;
+    $$('.stack i', row).forEach((light, n) => {
+      if (!was.lights[n]) return;
+      const now = getComputedStyle(light);
+      animateEl(light, [was.lights[n], { backgroundColor: now.backgroundColor, boxShadow: now.boxShadow }], slow);
+    });
+    const label = $('.who .state', row);
+    if (label && was.label) animateEl(label, [{ color: was.label }, { color: getComputedStyle(label).color }], slow);
+  });
 }
 
 function liveGroup(key, rows, m, isToday) {
@@ -1507,7 +1639,7 @@ function liveGroup(key, rows, m, isToday) {
     : ((byTeam ? m.team[key] : m.loc[key]) || { name: 'Ismeretlen' }).name;
   rows.sort((a, b) => (STATE_ORDER[a.st.state] - STATE_ORDER[b.st.state]) || byName(a.e, b.e));
   return `<section class="group${key === '_absent' ? ' group-absent' : ''}">
-    <h2 class="group-title">${esc(name)} <span class="group-n">${rows.length} fő</span></h2>
+    <h2 class="group-title" data-flip="g:${esc(key)}">${esc(name)} <span class="group-n">${rows.length} fő</span></h2>
     <div class="rows">${rows.map(r => liveRow(r, m, isToday)).join('')}</div>
   </section>`;
 }
@@ -1530,7 +1662,7 @@ function liveRow(r, m, isToday) {
   const stateText = st.state === 'block' ? `Elakadt: ${st.blockReason || 'ok nélkül'}` : STATE_LABEL[st.state];
   const when = st.state === 'off' ? '' : st.state === 'done' ? `Távozott ${fmtTime(st.lastOut)}` : `${fmtTime(st.since)} óta`;
   const tot = st.firstIn !== null ? `<span>Munka ${fmtDur(st.workMin)}</span><span class="muted">Bejött ${fmtTime(st.firstIn)}</span>` : '';
-  return `<article class="row st-${st.state}">
+  return `<article class="row st-${st.state}" data-emp="${e.id}" data-state="${st.state}" data-flip="r:${e.id}">
     <div class="row-main">
       <span class="stack" aria-hidden="true"><i class="l-red"></i><i class="l-amber"></i><i class="l-green"></i></span>
       <div class="who"><span class="name">${esc(e.name)}</span><span class="state">${esc(stateText)}</span></div>
@@ -1639,13 +1771,14 @@ function renderPlan() {
       ${list.map(a => {
         const t = m.task[a.task_id] || { name: 'Törölt feladat', color: '#9aa7b0' };
         const icons = `${a.details ? '<span class="chip-ic" title="Van leírás">📝</span>' : ''}${(a.attachments && a.attachments.length) ? `<span class="chip-ic" title="${a.attachments.length} rajz csatolva">📎</span>` : ''}`;
-        return `<span class="chip" style="--c:${esc(t.color)}"><button type="button" class="chip-open" data-act="assign-edit" data-id="${a.id}"><span class="chip-text">${esc(t.name)}${icons}${a.note ? `<small>${esc(a.note)}</small>` : ''}</span></button><button class="chip-x" data-act="unassign" data-id="${a.id}" aria-label="${esc(t.name)} törlése">×</button></span>`;
+        return `<span class="chip" data-id="${a.id}" style="--c:${esc(t.color)}"><button type="button" class="chip-open" data-act="assign-edit" data-id="${a.id}"><span class="chip-text">${esc(t.name)}${icons}${a.note ? `<small>${esc(a.note)}</small>` : ''}</span></button><button class="chip-x" data-act="unassign" data-id="${a.id}" aria-label="${esc(t.name)} törlése">×</button></span>`;
       }).join('')}
       <button class="cell-add" data-act="assign" data-emp="${e.id}" data-date="${key}" aria-label="Feladat hozzáadása: ${esc(e.name)}, ${esc(DAY_NAMES[dayIdx(d)])}">+</button>
     </div>`;
   };
 
-  $('#view').innerHTML = `<section class="plan">
+  const prevChips = capturePlanChips();
+  $('#view').innerHTML = `<section class="plan" data-week="${S.plan.monday}">
     <div class="toolbar">
       <div class="datenav">
         <button class="btn icon" data-act="plan-prev" aria-label="Előző hét">‹</button>
@@ -1664,6 +1797,49 @@ function renderPlan() {
         `<div class="pname">${esc(e.name)}</div>${days.map(d => cell(e, d)).join('')}`).join('')).join('')}
     </div></div>`}
   </section>`;
+  if (prevChips) chipsEnter($$('#view .chip[data-id]').filter(c => !prevChips.has(c.dataset.id)));
+}
+
+/* Heti terv: az új chip rövid beúszással nyílik ki, a törölt összecsukódik,
+   így a sor magassága sem ugrik. Hétváltáskor és nézetváltáskor nincs mihez
+   mérni (minden chip „új” lenne), ott semmi nem mozog. */
+function capturePlanChips() {
+  if (!motionOK()) return null;
+  const sec = $('#view > .plan');
+  if (!sec || sec.dataset.week !== S.plan.monday) return null;
+  return new Set($$('.chip[data-id]', sec).map(c => c.dataset.id));
+}
+
+// A chip nyitott és összecsukott alakja. A cellán belüli térközt (gap) is
+// elnyeli, különben összecsukott chip helyén is maradna egy rés.
+function chipFrames(chip) {
+  const cs = getComputedStyle(chip);
+  const gap = parseFloat(getComputedStyle(chip.parentElement).rowGap) || 0;
+  return [
+    { height: '0px', paddingTop: '0px', paddingBottom: '0px', marginBottom: `${-gap}px`, opacity: 0, transform: 'scale(.96)' },
+    { height: `${chip.offsetHeight}px`, paddingTop: cs.paddingTop, paddingBottom: cs.paddingBottom, marginBottom: '0px', opacity: 1, transform: 'none' },
+  ];
+}
+
+function chipsEnter(chips) {
+  if (!chips.length || !motionOK()) return;
+  const frames = chips.map(chipFrames);          // előbb minden méretet kiolvasunk, csak utána animálunk
+  chips.forEach((chip, i) => {
+    chip.style.overflow = 'hidden';
+    const a = animateEl(chip, frames[i], { duration: MOTION.base, easing: EASE_OUT });
+    if (a) a.finished.catch(() => {}).then(() => { chip.style.overflow = ''; });
+  });
+}
+
+// Törléskor: a chip összecsukódik, és úgy is marad, amíg az újrarajzolás le
+// nem cseréli. Hiba esetén a hívó a cancel()-lel azonnal visszaállítja.
+function chipLeave(chip) {
+  if (!chip || !motionOK()) return null;
+  const frames = chipFrames(chip).reverse();
+  chip.style.overflow = 'hidden';
+  const a = animateEl(chip, frames, { duration: MOTION.fast, easing: EASE_IN, fill: 'forwards' });
+  if (a) a.oncancel = () => { chip.style.overflow = ''; };
+  return a;
 }
 
 /* Beosztás ablak: "+" gombra új beosztás (leírás, rajz, feladat választás), chipre kattintva
@@ -3184,7 +3360,11 @@ let currentModal = null;
 
 function openModal({ title, body, actions = [], onMount, onClose }) {
   const root = $('#modal-root');
-  root.innerHTML = `<div class="backdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="m-title">
+  // Ha még látszik egy ablak (akár épp eltűnőben), az újat nem úsztatjuk be
+  // háttérrel együtt: ablakról ablakra váltáskor (pl. mentés után a PIN
+  // kiírása) a háttér végig sötét marad, csak maga az ablak cserélődik.
+  const handoff = Boolean(root.firstElementChild);
+  root.innerHTML = `<div class="backdrop${handoff ? ' is-handoff' : ''}"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="m-title">
     <header class="modal-head"><h2 id="m-title">${esc(title)}</h2><button class="icon-btn" data-mclose aria-label="Bezárás">×</button></header>
     <div class="modal-body">${body}<p class="form-err" hidden></p></div>
     ${actions.length ? `<footer class="modal-foot">${actions.map((a, i) => `<button class="btn${a.primary ? ' btn-primary' : ''}${a.danger ? ' btn-danger' : ''}" data-mact="${i}">${esc(a.label)}</button>`).join('')}</footer>` : ''}
@@ -3221,8 +3401,19 @@ function openModal({ title, body, actions = [], onMount, onClose }) {
 function closeModal(modal) {
   if (modal && modal !== currentModal) return;
   if (modal && modal._onClose) { try { modal._onClose(); } catch (e) { /* nem kritikus */ } }
-  $('#modal-root').innerHTML = '';
   currentModal = null;
+  const root = $('#modal-root');
+  const backdrop = root.querySelector('.backdrop:not(.is-leaving)');
+  if (!backdrop || !motionOK()) { root.innerHTML = ''; return; }
+  // Halk eltűnés: az ablak kiúszik, közben már nem kattintható és nem kap
+  // fókuszt, utána levesszük. Ha közben új ablak nyílt, az openModal már
+  // lecserélte – ilyenkor a remove() egy leválasztott elemen nem csinál semmit.
+  backdrop.classList.add('is-leaving');
+  backdrop.inert = true;
+  let removed = false;
+  const remove = () => { if (!removed) { removed = true; backdrop.remove(); } };
+  backdrop.addEventListener('animationend', ev => { if (ev.target === backdrop) remove(); });
+  setTimeout(remove, MOTION.fast + 60);         // tartalék, ha az animationend elmaradna (pl. háttérben lévő fül)
 }
 
 function showModalError(modal, err) {
@@ -3353,7 +3544,12 @@ const ACTIONS = {
   },
   'live-today': () => { S.live.date = todayKey(); S.live.open.clear(); return reloadLive(); },
   'live-group': el => { S.live.group = el.dataset.v; renderLive(); },
-  'live-toggle': el => { const id = el.dataset.emp; if (S.live.open.has(id)) S.live.open.delete(id); else S.live.open.add(id); renderLive(); },
+  'live-toggle': el => {
+    const id = el.dataset.emp;
+    if (S.live.open.has(id)) S.live.open.delete(id); else S.live.open.add(id);
+    renderLive();
+    if (S.live.open.has(id)) playClass($(`#view .row[data-emp="${CSS.escape(id)}"] .row-detail`), 'fade-in');
+  },
   'live-close': el => closeShiftModal(el.dataset.emp),
   'plan-prev': () => { S.plan.monday = ymd(addDays(parseYmd(S.plan.monday), -7)); return reloadPlan(); },
   'plan-next': () => { S.plan.monday = ymd(addDays(parseYmd(S.plan.monday), 7)); return reloadPlan(); },
@@ -3364,8 +3560,11 @@ const ACTIONS = {
     el.disabled = true;
     const row = S.plan.assignments.find(a => a.id === el.dataset.id);
     const attIds = (row && row.attachments || []).map(x => x.id);
-    await S.api.removeAssignment(el.dataset.id);
+    const leaving = chipLeave(el.closest('.chip'));   // a chip már csukódik, amíg a törlés fut
+    try { await S.api.removeAssignment(el.dataset.id); }
+    catch (e) { if (leaving) leaving.cancel(); el.disabled = false; throw e; }
     for (const id of attIds) { try { await S.api.deleteAttachmentIfOrphan(id); } catch (e) { /* nem kritikus */ } }
+    if (leaving) await leaving.finished.catch(() => {});
     await reloadPlan();
   },
   'assign-edit': el => openAssignmentModal({ mode: 'edit', assignmentId: el.dataset.id }),
@@ -3373,6 +3572,7 @@ const ACTIONS = {
     S.admin.tab = el.dataset.v;
     await loadUsersIfNeeded();          // a Felhasználók fül adata csak itt derül ki
     renderAdmin();
+    playClass($('#view .admin-body'), 'fade-in');
   },
   'emp-new': () => employeeModal(null),
   'emp-edit': el => employeeModal(el.dataset.id),
@@ -3414,7 +3614,7 @@ const ACTIONS = {
   'company-new': () => companyModal(),
   'company-license': el => licenseModal(el.dataset.id),
   'company-del': el => companyDeleteModal(el.dataset.id, el.dataset.name),
-  'rep-tab': el => { S.reports.tab = el.dataset.v; renderReports(); },
+  'rep-tab': el => { S.reports.tab = el.dataset.v; renderReports(); playClass($('#rep-body'), 'fade-in'); },
   'rep-print': () => window.print(),
   'rep-excel': () => exportReportsExcel(),
 };
