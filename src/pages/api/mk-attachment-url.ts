@@ -1,4 +1,4 @@
-// Munkakövetés – a tablet (anon) ezen keresztül kér rövid lejáratú linket egy csatolt rajzhoz.
+// AndonWork – a tablet (anon) ezen keresztül kér rövid lejáratú linket egy csatolt rajzhoz.
 //
 // A rajzok privát Supabase Storage bucketben vannak (mk-rajzok), a tabletnek nincs bejelentkezése,
 // ezért nem tud közvetlenül signed URL-t kérni a Storage-tól. Ehelyett:

@@ -546,6 +546,43 @@ async function runCrossTenantProbe() {
     }
   }
 
+  // ---------------------------------------------------------------------
+  // PROFIL NÉLKÜLI RENDSZERGAZDA (2026. szeptember 24.). Egy tiszta platform
+  // adminnak szándékosan nincs mk_profiles sora. Élesben egy ilyen fióknál
+  // eltűnt a Cégek fül; a kliens oldali ok a hibák egybefogása volt (lásd
+  // CLAUDE.md), itt az adatbázis-oldali feltételeket rögzítjük: a
+  // rendszergazda-jelzés IGAZ, a saját profil lekérdezése hiba nélkül üres,
+  // cégadatot pedig nem lát (sem A, sem B cégét).
+  {
+    const email = `crosstenant-admin-${Date.now()}@example.invalid`;
+    const password = `Test-${Math.random().toString(36).slice(2)}-Aa1!`;
+    const { data: created, error: createErr } = await admin.auth.admin.createUser({ email, password, email_confirm: true });
+    if (createErr) fail('Nem sikerült próba-rendszergazdát létrehozni: ' + createErr.message);
+    const adminId = created.user.id;
+    const { error: paErr } = await admin.from('mk_platform_admins').insert({ user_id: adminId });
+    if (paErr) fail('Nem sikerült a próba-rendszergazdát felvenni: ' + paErr.message);
+
+    const clientAdmin = createClient(API_URL, ANON_KEY);
+    const { error: siErr } = await clientAdmin.auth.signInWithPassword({ email, password });
+    if (siErr) fail('A próba-rendszergazda nem tudott bejelentkezni: ' + siErr.message);
+
+    const { data: isAdmin, error: isAdminErr } = await clientAdmin.rpc('mk_is_platform_admin');
+    if (isAdminErr || isAdmin !== true) {
+      leaks.push(`profil nélküli rendszergazda: mk_is_platform_admin() nem igazat adott (${isAdminErr ? isAdminErr.message : isAdmin})`);
+    }
+    const { data: ownProfile, error: ownErr } = await clientAdmin
+      .from('mk_profiles').select('user_id,company_id,role,username,email,contact_email').eq('user_id', adminId).maybeSingle();
+    if (ownErr) leaks.push('profil nélküli rendszergazda: a saját profil lekérdezése hibát adott: ' + ownErr.message);
+    else if (ownProfile) leaks.push('profil nélküli rendszergazda: váratlanul van profilja');
+    const { error: waErr } = await clientAdmin.rpc('mk_write_allowed');
+    if (waErr) leaks.push('profil nélküli rendszergazda: mk_write_allowed() hibát adott: ' + waErr.message);
+    for (const c of [companyA, companyB]) {
+      const { data: rows } = await clientAdmin.from('mk_employees').select('id').eq('company_id', c.id);
+      if ((rows?.length ?? 0) > 0) leaks.push(`profil nélküli rendszergazda: LÁTJA a(z) ${c.name} dolgozóit`);
+    }
+    await admin.auth.admin.deleteUser(adminId).catch(() => null);
+  }
+
   if (leaks.length) {
     fail('KERESZT-BÉRLŐS SZIVÁRGÁS ÉSZLELVE:\n - ' + leaks.join('\n - '));
   }

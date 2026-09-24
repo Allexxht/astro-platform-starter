@@ -1,17 +1,23 @@
-# Munkakövetés modul – projektjegyzet
+# AndonWork – projektjegyzet
 
 ## Mi ez
-Munkakövető rendszer (MES-lite) a hegesztőüzemnek. Két felülete van:
+**AndonWork** (andonwork.com): munkakövető rendszer (MES-lite) kis- és középméretű gyártóüzemeknek – elsőként hegesztő- és lakatosüzemeknek. Cégenkénti éves licencdíjas termék, több ügyfél egy rendszerben (lásd „Többbérlős SaaS – terv”).
+
+**Az első ügyfél a BREMAT.** Nála indult és nála fut élesben, de a termék nem a BREMAT-é és nem neki készül: a BREMAT egy cég a többi között (`mk_companies` legelső sora). Ahol ez a jegyzet vagy a kód a BREMAT-ot említi, az mindig erre az ügyfélre, az ő adataira, fiókjaira vagy a vele kapcsolatos történeti döntésekre vonatkozik – nem a termékre.
+
+Két felülete van:
 - **Tablet (csarnok):** falra szerelt Android tablet kioszk módban. A dolgozó PIN-nel azonosít, látja a mai beosztását, és gombokkal jelez: Kezdés, Feladatváltás, Szünet, Elakadtam (okkal), Műszak vége.
 - **Iroda:** heti beosztás (dolgozó × nap rács), élő nézet (ki mit csinál, hol, mióta), törzsadatok, riportok Excel exporttal.
 
 A bevezetés ütemekben halad. Most az MVP kész, és az ötletek menet közben alakulnak át: ami nem válik be, azt kivesszük.
 
-**Irányváltás (2026. szeptember):** a cél már nem csak a BREMAT belső rendszere, hanem több cégnek eladható, cégenkénti éves licencdíjas termék. A teljes terv a „Többbérlős SaaS – terv” szakaszban van. **Az adatmodell + RLS kör kódja elkészült** (lásd „Állapot”); a bejelentkezés/szerepkör-UI, a rendszergazda-felület és a licenc-kikényszerítés még a terv szintjén van, azok a következő körök.
+**Irányváltás (2026. szeptember):** a rendszer egy üzem belső eszközeként indult, azóta több cégnek eladható termék. A teljes terv a „Többbérlős SaaS – terv” szakaszban van. Kész és élesben fut: az adatmodell + RLS, a licenc-kikényszerítés, a felhasználókezelés, a rendszergazda-felület és az e-mailes bejelentkezés (lásd „Állapot”). Hátravan többek közt a kétlépcsős azonosítás és a hozzáférési napló.
+
+**Elnevezés (2026. szeptember 24.):** a termék neve **AndonWork**, a felületen (fejléc, bejelentkezés, oldalcím, Excel-fájlnév) ez szerepel. Ami szándékosan NEM változott: az `mk_` táblaelőtag (az átnevezés nem éri meg a kockázatot), a `/munkakovetes/` útvonal (a tabletek linkjei erre mutatnak), és a Netlify cím (`bremat.netlify.app`) – a saját domain beállítása külön lépés, lásd „Ütemterv” → „Saját domain”.
 
 ## Fájlok
 - `public/munkakovetes/index.html` – egyfájlos app (vanilla JS, nincs build lépés, CSS és JS inline, kommentfejlécekkel tagolva). A script elején van a `CONFIG`. Üres Supabase kulcsokkal DEMÓ módban fut, memóriában tárolt mintaadatokkal. Az Astro starter a `public/` mappát változtatás nélkül átmásolja, így az app a `/munkakovetes/` útvonalon szolgálódik ki.
-- `src/lib/mk-supabase.ts` – közös szerveroldali segédmodul a service role-t használó végpontokhoz (Supabase URL/kulcsok egy helyen, hívó azonosítása a Bearer tokenből, profil/platform-admin lekérés, felhasználónév→e-mail átalakítás, jelszó-ellenőrzés). Ha egyszer cégenkénti Supabase projektre váltanánk, elég ezt paraméterezhetővé tenni.
+- `src/lib/mk-supabase.ts` – közös szerveroldali segédmodul a service role-t használó végpontokhoz (Supabase URL/kulcsok egy helyen, hívó azonosítása a Bearer tokenből, profil/platform-admin lekérés, e-mail- és jelszó-ellenőrzés, Storage API). Ha egyszer cégenkénti Supabase projektre váltanánk, elég ezt paraméterezhetővé tenni.
 - `src/pages/api/mk-attachment-url.ts` – Astro API endpoint (Netlify functionként fut). A tablet (anon) ezen keresztül kér rövid lejáratú (10 perces) signed URL-t egy csatolt rajzhoz.
 - `src/pages/api/mk-users.ts` – a cég saját felhasználóinak felvétele és törlése (owner jogkör). Csak az van itt, amihez tényleg service role kell (auth.users létrehozás/törlés); a listázás és a szerepkör-állítás a kliensből, RLS mögött megy.
 - `src/pages/api/mk-admin.ts` – rendszergazda-végpont: cégek listája, új cég az első felhasználójával és licenc-lejárattal, licenc módosítása. A hívó platform-admin voltát a `mk_platform_admins` táblából ellenőrzi, a saját tokenje alapján.
@@ -67,7 +73,7 @@ A bevezetés ütemekben halad. Most az MVP kész, és az ötletek menet közben 
 
 ## Többbérlős SaaS – terv (2026. szeptember 15.)
 
-Ez a szakasz a megbeszélt, eldöntött irányt írja le a BREMAT-specifikus belső rendszerből eladható, több céges termékké váláshoz. **Még nem készült hozzá kód** – ez a következő fejlesztési kör tervezési alapja.
+Ez a szakasz a megbeszélt, eldöntött irányt írja le: egy üzem belső eszközéből hogyan lesz több cégnek eladható termék (AndonWork). Eredetileg tervként készült; ami azóta megépült, azt az egyes alpontok és az „Állapot” jelzik.
 
 ### Cégazonosítás az adatmodellben – ez épül MOST, a fizikai szétválasztás kérdésétől függetlenül
 Minden `mk_` táblához egy `company_id` oszlop kerül (denormalizáltan, még ott is, ahol JOIN-nal levezethető lenne – egyszerűbb és gyorsabb RLS-t/indexet ad). Ehhez tartozik:
@@ -164,7 +170,7 @@ Az induló verzió **csak két céges szerepkört tartalmaz** – a helyszín-ko
 - **Csapat- és helyszínnév egyedisége cégen belülire került** (`mk_teams`/`mk_locations`): a 003 a PIN-egyediséget átvitte, de ezt a kettőt kihagyta – globálisan egyedi maradt. Egy cégnél ez nem tűnik fel, a **második cégnél viszont azonnal falnak megy** (nem tudna „Raktár" helyszínt felvenni, ha egy másik cégnél már van). A 004 ezt is rendbe teszi, és emiatt a `supabase-setup.sql`-ben a licenc-szakasz a kezdő adatok ELÉ került (a kezdő adatok `on conflict` hivatkozása már az új megszorításra szól).
 
 ### Új ügyfél beállítása (rendszergazda-felület)
-Egy új, csak platform-adminnak látható nézet: cégnév, licenc-lejárat, első felhasználó (felhasználónév + jelszó), opcionális "példa adatok betöltése" kapcsoló (a mai BREMAT-mintájú csapatok/helyszínek/feladatok, amit az ügyfél átnevezhet – ha nincs bejelölve, a cég üresen indul). Technikai csavar: az `auth.users` létrehozása csak service role kulccsal lehetséges, ezért ez egy **új, író Netlify function** lesz (a meglévő `mk-attachment-url.ts` mintájára, de ez a hívó platform-admin jogosultságát is ellenőrzi, mielőtt bármit létrehoz).
+Egy új, csak platform-adminnak látható nézet: cégnév, licenc-lejárat, első felhasználó (felhasználónév + jelszó), opcionális "példa adatok betöltése" kapcsoló (egy tipikus hegesztőüzem mintájú csapatok/helyszínek/feladatok, amit az ügyfél átnevezhet – ha nincs bejelölve, a cég üresen indul). Technikai csavar: az `auth.users` létrehozása csak service role kulccsal lehetséges, ezért ez egy **új, író Netlify function** lesz (a meglévő `mk-attachment-url.ts` mintájára, de ez a hívó platform-admin jogosultságát is ellenőrzi, mielőtt bármit létrehoz).
 
 ### Licenc
 - `mk_companies.license_expires_at` + `active` (kézi kapcsoló, a dátumtól függetlenül).
@@ -220,12 +226,13 @@ Egy `mk_access_log` tábla rögzíti, ki mikor melyik cég adatához fért hozz�
 - **Export (GDPR adathordozhatóság):** az ügyfél kérésére egy "Teljes export" a Riportok Excel-exportján felül a törzsadatokat (dolgozók, feladatok, helyszínek, csapatok, tabletek) és a csatolt rajzokat is tartalmazza (egy ZIP-be csomagolva, a fájlokkal együtt) – ez a mai Riport-export bővítése, még nincs megépítve.
 - **Végleges törlés** a türelmi időszak lejártával. **Megépítve (2026. szeptember 18.):** Cégek → Törlés gomb, a háttérben az `mk-admin.ts` `delete_company` művelete. Három védelem, mielőtt bármit törölne: a cég nevét be kell gépelni, a saját cégét senki nem törölheti, és a legelső (BREMAT) céget a végpont egyáltalán nem törli – azt tudatos, kézi művelettel (`db/proba_ceg_torles.sql`) lehet csak. A lépéssor: `DELETE ... WHERE company_id = X` minden `mk_` táblán a megfelelő sorrendben (vagy CASCADE-del), a `<company_id>/` prefixű Storage-objektumok törlése a Storage API-val (nem SQL-lel megy, lásd Migráció), és a céghez tartozó `auth.users` sorok törlése az Admin API-val. A `mk_access_log` bejegyzései nem törlődnek, csak anonimizálódnak (lásd Hozzáférési napló).
 
-### Migráció: BREMAT mint első cég
+### Migráció: BREMAT mint első ügyfél (első cég)
+Az egycéges MVP adatait az első ügyfél, a BREMAT cégsoraként kellett átvinni a többbérlős sémába. A lépések:
 1. Staging Supabase projekten próbafuttatás először.
-2. Új, kizárólag a Munkakövetésnek fenntartott Supabase projekt (leválasztás a Valk logbooktól) – ez a migráció része, nem külön lépés.
+2. Új, kizárólag az AndonWorknek fenntartott Supabase projekt (leválasztás a Valk logbooktól) – ez a migráció része, nem külön lépés.
 3. Migrációs SQL: `mk_companies` egy sorral (BREMAT), `company_id` minden táblán (nullable → backfill → `NOT NULL` + FK + index), `mk_profiles` a meglévő `@bremat.local` felhasználóknak `role='owner'`-rel, RLS-csere, RPC-k cseréje.
 4. Storage: a meglévő fájlok tényleges áthelyezése `<company_id>/` prefix alá – ez a Storage API `move()` hívásával megy (nem tiszta SQL-lel), egy egyszeri scriptben.
-5. **A BREMAT-felhasználók UX-a eddig a pontig nem változik** – a company-választó csak akkor jelenik meg, ha már 2+ cég van.
+5. **Az első ügyfél (BREMAT) felhasználóinak UX-a eddig a pontig nem változik** – a company-választó csak akkor jelenik meg, ha már 2+ cég van.
 6. **Tényleges döntés (2026. szeptember 16.): a fenti 3. pont (klasszikus migráció) NEM ez futott.** Amikor a kód elkészült, kiderült, hogy az éles adatbázisban nincs valódi, megőrzendő adat (csak "Teszt Elek" és próba-sorok) – ilyenkor egyszerűbb és kockázatmentesebb egy friss telepítés, mint egy éles migráció (a migráció extra mozgó részei – trigger-sorrend, RLS-csere, backfill élő adaton – csak kockázatot adnak hozzá, hasznot nem, ha nincs mit megvédeni). Az éles út helyette: `mk_` táblák kiürítése (`TRUNCATE`) + a friss (többbérlős) `db/supabase-setup.sql` lefuttatása nulláról + törzsadatok kézi felvétele – pontos lépéssor: `db/MIGRATION_RUNBOOK.md` „8b” pont. **A migráció és a rollback (`db/migrations/003_multitenant.sql` + `db/migrations/rollback/`) megmaradt a repóban** – a jövőbeli valós ügyféladathoz (2. cég, vagy egy későbbi valós BREMAT-migráció) kell majd, és a `cross-tenant-rollback-test` CI job továbbra is folyamatosan próbálja, hogy működjön, amikor szükség lesz rá. A stagingen a klasszikus migrációt (8. pont) így is végigcsináljuk – az nem az élesre vonatkozó döntést igazolja, hanem azt, hogy a mechanizmus maga a jövőbeli valós használatra működik.
 
 ### Kockázatok és kötelező tesztek/eljárások
@@ -243,7 +250,7 @@ Egy `mk_access_log` tábla rögzíti, ki mikor melyik cég adatához fért hozz�
 9. **Erős jelszó + kétlépcsős azonosítás** – lásd „Bejelentkezés és MFA” fent.
 
 ## Állapot (2026. szeptember 11.)
-- Az MVP élesben fut: Netlify (`bremat.netlify.app`) + saját Supabase projekt (`nuufcwpbjfimykumufgi`). A `CONFIG`-ban be van írva a Supabase URL és a publishable key.
+- Az MVP élesben fut: Netlify (`bremat.netlify.app` – a cím még az első ügyfél nevét viseli, a saját domain külön lépés) + saját Supabase projekt (`nuufcwpbjfimykumufgi`). A `CONFIG`-ban be van írva a Supabase URL és a publishable key.
 - Deploy: az `Allexxht/astro-platform-starter` repo, az app a `public/munkakovetes/` alatt.
 - Azóta bekerült változások:
   - **Irodai belépés** (a 2026. szeptemberi e-mailes átállásig felhasználónévvel ment, `CONFIG.LOGIN_DOMAIN`; ma e-mail cím + jelszó, lásd Biztonság).
@@ -266,6 +273,8 @@ Egy `mk_access_log` tábla rögzíti, ki mikor melyik cég adatához fért hozz�
 
 - **2026. szeptember 18.: e-mailes bejelentkezés + a próbából jött két hiányosság megépítve.** `db/migrations/005_email_login.sql` + rollback (`mk_profiles.email`, az `auth.users.email` tükre, csak service_role írhatja), a kliensben e-mailes login, „Elfelejtett jelszó" és új-jelszó képernyő (`resetPasswordForEmail` + PKCE, `?recovery=1`), kifejezett munkamenet-beállítások, „Kijelentkezés" gomb, és két apró javítás: a fejléc egy tiszta rendszergazdát eddig tévesen „irodai"-nak írt (nincs céges szerepköre, `role = null`), a Cégek nézet pedig most felhasználónként mutatja a bejelentkezési címet, plusz a cég dolgozó-/eseményszámát és az utolsó esemény napját. Szerveroldalon a felhasználó- és cégfelvétel e-mail címmel megy (felhasználónév → e-mail átalakítás törölve), és bekerült a `delete_company`. Helyben ellenőrizve: a friss `supabase-setup.sql` háromszor egymás után hibátlan, a 005 idempotens, a rollback + migráció kör **bájtra pontosan** visszaadja a sémát (oszlopok, oszlop-jogok, függvény-md5-ök, policy-k), az `email` oszlop `authenticated` szerepkörből nem írható, miközben a szerepkör-állítás és a saját sor védelme változatlanul működik. A kliens böngészővel végig van kattintva: 7 ellenőrzés DEMÓ módban (cég létrehozása e-maillel, hiányzó e-mail elutasítva, cégtörlés név-megerősítéssel, felhasználó felvétele, rövid jelszó elutasítva, élő nézet/heti terv) és 6 a bejelentkezési útvonalon (e-mail mező, puszta név elutasítva, rossz jelszó, jelszó-visszaállítás semleges válasza, fejléc-szerepkörök + kijelentkezés, `?recovery=1` képernyő a két jelszó egyezésével) – JS hiba nélkül. **A Resend beállítása (domain hitelesítés + SMTP a Supabase-ben) még hátravan, addig a jelszó-visszaállító levél nem megy ki.**
 - **2026. szeptember 24.: a szövegkijelölés hibája javítva.** Bármelyik felugró ablakban (pl. Új cég) egy mezőben kezdett, de az ablakon kívül befejezett egérhúzásos kijelölés bezárta az ablakot, és a beírt adat elveszett: a böngésző a `click`-et ilyenkor a lenyomás és a felengedés közös szülőjének, vagyis a háttérnek küldi, a háttér pedig `ev.target === backdrop` alapján zárt. Mostantól csak akkor zár, ha az egérgomb lenyomása is a háttéren történt. Böngészővel reprodukálva a javítás előtt, és ellenőrizve utána (a háttérre kattintás továbbra is bezár).
+- **2026. szeptember 24.: a termék neve AndonWork.** A felületen (fejléc, bejelentkező képernyő, oldalcím, Excel-fájlnév), a kódkommentek fejlécében és a dokumentációban a „Munkakövetés” terméknév helyére AndonWork került, a BREMAT pedig mindenhol első ügyfélként szerepel, nem a termék gazdájaként. Változatlan maradt: az `mk_` előtag, a `/munkakovetes/` útvonal, a Netlify cím, a tabletek, a PIN-ek és az adatbázis tartalma; ahol a kód vagy az SQL a BREMAT cégre (sorra, fiókokra, `bremat.local` címekre) utal, az is érintetlen. A végigkattintós forgatókönyv 0–2. és 8. lépése egyúttal az e-mailes belépéshez és a felületi cégtörléshez igazodott.
+- **2026. szeptember 24.: profil nélküli rendszergazdánál eltűnt a Cégek fül – javítva.** Egy új, valódi e-mailes platform-admin fióknak (szándékosan nincs `mk_profiles` sora) nem jelent meg a Cégek fül, így a cégkezeléshez sem fért hozzá. Az ok a kliensben volt: a `loadMe()` a profilt, a cégsort, a licencet és a rendszergazda-jelzést egyetlen `Promise.all`-ban kérte le, így bármelyik lekérdezés hibája – pl. a még le nem futtatott 005 migráció hiányzó `mk_profiles.email` oszlopa – az egész jogosultsági állapotot elvitte, a sikeres rendszergazda-lekérdezéssel együtt. A hibát jelző banner ráadásul csak a Heti terv és a Törzsadatok nézetben jelent meg, a nyitó Élő nézetben nem, ezért semmi nem látszott belőle. **Szabály:** a jogosultsági lekérdezések egymástól függetlenek (`Promise.allSettled`), a részleges hiba minden nézet fölött, a fejléc alatt látszik (`meErrorNotice()`), és ami sikerült, az érvényes marad. Stubolt supabase-js-sel reprodukálva a javítás előtt (nincs Cégek fül, nincs hibaüzenet), és ellenőrizve utána; a kereszt-teszt azóta a profil nélküli rendszergazda adatbázis-oldali útját is próbálja (`mk_is_platform_admin()` igaz, saját profil hiba nélkül üres, cégadatot nem lát).
 
 ## Ütemterv
 
@@ -290,6 +299,21 @@ csússzanak.
    cég sora), a Cégek nézet pedig a hozzá tartozó, névbegépeltetős megerősítést.
    A legelső (BREMAT) céget és a saját cégét a végpont szándékosan nem törli.
    Ugyanez a funkció a GDPR szerinti végleges törlés alapja.
+
+### Saját domain: andonwork.com – TEENDŐ, ha a domain megvan
+A kód nem függ a domaintől (a kliens relatív útvonalakat hív, a Supabase URL a `CONFIG`-ban van), tehát ez tisztán beállítás, kódváltozás nélkül. Javasolt felállás: **az app az `app.andonwork.com` címen**, a csupasz `andonwork.com` pedig később egy bemutatkozó oldalé lehet.
+
+1. **Netlify → a site (ma `bremat`) → Domain management → Add a domain** → `app.andonwork.com`. Ha a gyökérdomaint is ide akarod, azt is (`andonwork.com`, a `www` változatot a Netlify magától felveszi).
+2. **DNS** – két út, a Netlify mindkettőnél kiírja a pontos értékeket:
+   - *A domain-szolgáltatónál maradó DNS:* `app` → **CNAME** → `bremat.netlify.app`; a gyökérdomainhez **A rekord** a Netlify terheléselosztójára (a Netlify felületén megadott IP, jelenleg `75.2.60.5`), a `www` → CNAME → `bremat.netlify.app`.
+   - *Netlify DNS:* a domain-szolgáltatónál a névszervereket a Netlify által kiírt négy névszerverre cseréled. **Csapda:** ekkor a Resend DNS rekordjait (SPF, DKIM, esetleg MX) is fel kell venni a Netlify DNS-be, különben a jelszó-visszaállító levelek elakadnak.
+3. **HTTPS:** a Netlify a DNS érvényesülése után magától kér Let's Encrypt tanúsítványt (Domain management → HTTPS → *Verify DNS configuration*, ha nem indul el magától).
+4. **Primary domain:** az `app.andonwork.com`-ot állítsd elsődlegesre. A Netlify ettől kezdve a `bremat.netlify.app` címet 301-gyel átirányítja rá, a `?terminal=...` paraméterrel együtt – **a tabletek régi linkjei így tovább működnek**, nem kell mindet egyszerre átállítani.
+5. **Supabase → Authentication → URL Configuration:** Site URL → `https://app.andonwork.com`; a Redirect URLs közé `https://app.andonwork.com/munkakovetes/**`. A régi `bremat.netlify.app` bejegyzést az átállás idejére hagyd bent.
+6. **Resend:** a levelek feladója innentől lehet `no-reply@andonwork.com` (a domaint a Resendben hitelesíteni kell), és ezt a Supabase SMTP Settings feladó mezőjében is át kell írni.
+7. **Kiket érint:** az irodai felhasználóknak **egyszer újra be kell jelentkezniük**, mert a böngésző a munkamenetet címenként tárolja. A tabletek (PIN, nincs munkamenet) és az adatbázis tartalma változatlan.
+
+**A `bremat.netlify.app` címmel mi legyen:** maradjon, ne töröld és ne nevezd át. A Netlify nem enged site-ot „netlify.app nélkül” futtatni, és a site nevének átírása (Site configuration → Change site name, pl. `andonwork`) a régi címet **azonnal, átirányítás nélkül** megszüntetné – ez minden tabletet kizárna. A 4. pont átirányítása mellett a régi cím úgyis láthatatlan marad. A site átnevezése csak akkor jöhet szóba, ha már minden tablet az új linket használja (Törzsadatok → Tabletek → „Link másolása”, majd a kioszkban kicserélve).
 
 - **Belépő feltétel a próbahét előtt (KÖTELEZŐ, nem halasztható): mentés + visszatöltés kipróbálva.** Mielőtt az első valódi dolgozói adat (valódi dolgozók, PIN-ek, munkaidő, ügyfélrajzok) bekerül az éles rendszerbe, egyszer végig kell csinálni: teljes `pg_dump -Fc` mentés az éles projektről, majd annak **tényleges visszatöltése** egy eldobható/staging projektbe (`pg_restore`), és annak ellenőrzése, hogy a táblák sorszámai egyeznek. A 2026. szeptemberi éles telepítésnél ez tudatosan kimaradt (akkor csak próba-sorok voltak, nem volt mit félteni) – ettől kezdve viszont ez az első teendő, mert innentől van veszíteni való. A pontos parancsok: `db/MIGRATION_RUNBOOK.md` 7. pont.
 - **Következő nagy lépés: a többbérlős átállás** – lásd „Többbérlős SaaS – terv” szakasz, ott van fázisokra bontva (adatmodell+RLS+kereszt-teszt → bejelentkezés/szerepkör-UI → rendszergazda-felület → licenc). Az első fázis (adatmodell+RLS+kereszt-teszt) kész és élesben fut. A második fázis (bejelentkezés/szerepkör) **két PR-ra bontva**: (a) licenc + felhasználókezelés + rendszergazda-felület – ez elkészült, lásd „Állapot”; (b) kétlépcsős azonosítás (TOTP + megbízható eszköz + e-mailes tartalék) – ez még nincs megépítve. A külső függősége időközben megvan: a **Resend fiók kész**, és a jelszó-visszaállításhoz már be is van kötve (Supabase SMTP); az MFA e-mailes tartaléka erre épülhet. A helyszín-korlátozott szerepkör tudatosan NEM része ennek a körnek (lásd „Szerepkörök” a tervben, miért). Ez felülírja/pontosítja az alábbi listát ott, ahol átfedés van (pl. a "szerepkörök" már nem különálló 3. körös ötlet, hanem a többbérlős terv része).

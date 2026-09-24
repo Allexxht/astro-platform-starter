@@ -1,4 +1,4 @@
-# Új ügyfél beállítása – végigkattintós forgatókönyv
+# AndonWork – új ügyfél beállítása, végigkattintós forgatókönyv
 
 Ez egy **próba-forgatókönyv**: egy kitalált céggel végigmegy az egész úton, a cég
 létrehozásától a törlésig. Két célja van:
@@ -8,9 +8,10 @@ létrehozásától a törlésig. Két célja van:
 
 A próba-cég: **Kovács Fémipari Kft.**, 12 dolgozó, 2 csarnok.
 
-> **A BREMAT adataihoz ez a forgatókönyv nem nyúl.** Az egyetlen pont, ahol a BREMAT
-> szóba kerül, a rendszergazda-bejelentkezés (a Cégek nézet onnan érhető el). A 8. lépés
-> törlő scriptje beépítetten megtagadja a legelső (BREMAT) cég törlését.
+> **A meglévő ügyfél (a BREMAT, az AndonWork első ügyfele) adataihoz ez a
+> forgatókönyv nem nyúl.** Te rendszergazdaként lépsz be (a Cégek nézet onnan érhető
+> el), és a 8. lépés törlése – a felületen és a tartalék SQL-scriptben is –
+> beépítetten megtagadja a legelső cég törlését.
 
 Menet közben jegyezd fel az időt lépésenként – a végén van hozzá egy táblázat.
 
@@ -20,7 +21,7 @@ Menet közben jegyezd fel az időt lépésenként – a végén van hozzá egy t
 
 | Ellenőrzés | Hol | Mit kell látnod |
 |---|---|---|
-| A javított kliens él-e | Netlify → `bremat` projekt → Deploys | A legutolsó deploy **Published**, és a commit a „Javítás: a saját profil lekérése user_id-re szűrve" |
+| A friss kliens él-e | Netlify → a projekt (ma még `bremat` néven) → Deploys | A legutolsó deploy **Published**, a bejelentkező képernyőn **AndonWork** felirat és **E-mail cím** mező |
 | Service role kulcs | Netlify → Site configuration → Environment variables | `MK_SUPABASE_SERVICE_ROLE_KEY` szerepel a listában |
 
 ⚠️ **Itt el fogsz akadni, ha a service role kulcs hiányzik.** Nemcsak a tabletes
@@ -29,55 +30,56 @@ létrehozása ezen a kulcson keresztül megy. Ha nincs beállítva, a „Létreh
 gomb azt írja: *A szerver nincs beállítva (hiányzik a Supabase service role kulcs).*
 
 Nyiss **két böngészőt** (vagy egy normál + egy privát ablakot):
-- **A ablak** – te, rendszergazdaként (`iroda` / BREMAT).
+- **A ablak** – te, rendszergazdaként, a saját e-mail címeddel.
 - **B ablak** – a Kovács Kft. fiókja. Ezt majd a 2. lépésben nyitod meg.
 
 ---
 
 ## 1. Új cég létrehozása (3 perc) — *A ablak*
 
-1. Lépj be `iroda` néven. A fejlécben ott a neved és a **tulajdonos** felirat.
-2. Kattints a **Cégek** fülre. Egy sort látsz: BREMAT, `bremat.local` domainnel.
+1. Lépj be a saját e-mail címeddel. A fejlécben ott a neved, mellette a
+   **rendszergazda** felirat (ha a BREMAT-nál is van fiókod, a **tulajdonos** is).
+2. Kattints a **Cégek** fülre. Egy sort látsz: a BREMAT-ot, a felhasználóival és
+   a használati számokkal (dolgozók, események).
 3. **Új cég** gomb. Töltsd ki:
    - Cégnév: `Kovács Fémipari Kft.`
    - Licenc lejárata: **mai dátum + 1 év**
-   - Első felhasználó neve: `iroda`
+   - Első felhasználó e-mail címe: egy **valódi, általad olvasott** cím (pl. egy
+     `+kovacs` alias a sajátodhoz: `nev+kovacs@gmail.com`) – ezzel lépsz be a
+     2. lépésben, és ide jön a jelszó-visszaállító levél is
+   - Neve: `Kovács Iroda` (nem kötelező)
    - Jelszava: **legalább 12 karakter, betűvel és számmal** (pl. `KovacsProba2026`)
-   - E-mail cím: `probaczim@example.com`
    - ☑ **Példa törzsadatok betöltése** – pipáld be
 4. **Létrehozás**.
 
-**Amit látnod kell:** a lista két sorra bővül, a Kovács Kft. sorában a domain
-`kovacs-femipari-kft.local`, a felhasználók oszlopban `iroda (tul.)`, a licencnél
-a megadott dátum.
+**Amit látnod kell:** a lista két sorra bővül, a Kovács Kft. sorában a felhasználók
+oszlopban `Kovács Iroda (tul.)` és alatta az e-mail cím, a licencnél a megadott dátum.
 
-⚠️ **Itt akadhatsz el, ha rövid jelszót adsz meg.** A szerver visszautasítja
-(*A jelszó legyen legalább 12 karakter*) – ez szándékos, de az űrlap nem jelzi előre.
+⚠️ **Itt akadhatsz el, ha rövid jelszót vagy hibás e-mail címet adsz meg.** Az
+űrlap azonnal jelzi (*A jelszó legyen legalább 12 karakter* / *Add meg az első
+felhasználó e-mail címét*).
 
-📝 **Jegyezd fel a domaint** (`kovacs-femipari-kft.local`), a következő lépéshez kell.
+⚠️ **Ha a cím már foglalt** (egy korábbi próbából maradt fiók), *Ezzel az e-mail
+címmel már van fiók* üzenetet kapsz – használj új aliast, vagy töröld a régi próba-céget.
 
 ---
 
 ## 2. Belépés a Kovács Kft. fiókjával (2 perc) — *B ablak*
 
-Nyisd meg ugyanazt a címet a **B ablakban**, és lépj be.
+Nyisd meg ugyanazt a címet a **B ablakban**, és lépj be az 1. lépésben megadott
+**e-mail címmel** és jelszóval.
 
-> ⚠️ **EZ A FORGATÓKÖNYV LEGVALÓSZÍNŰBB BUKTATÓJA.**
-> A felhasználónév mezőbe **a teljes e-mail címet kell beírnod**:
-> `iroda@kovacs-femipari-kft.local`
+> Korábban ez volt a forgatókönyv legvalószínűbb buktatója: a belépés felhasználónévvel
+> ment, a kliens egy beégetett domaint (`bremat.local`) tett mögé, így a 2. ügyfél
+> felhasználója az első ügyfél fiókjába próbált volna belépni. Az e-mailes belépéssel
+> (2026. szeptember 18.) ez megszűnt: a cím önmagában megmondja, melyik céghez tartozol.
 >
-> Ha csak annyit írsz, hogy `iroda`, a kliens a **BREMAT** domainjét teszi mögé
-> (`iroda@bremat.local`), mert a `CONFIG.LOGIN_DOMAIN` egyetlen, beégetett érték.
-> Ilyenkor vagy hibás jelszót jelez, vagy – rosszabb esetben – a **BREMAT fiókba**
-> lépsz be, és azt hiszed, a Kovács Kft.-t nézed.
->
-> Ez nem véletlen és nem is hiba: a cég-választó tudatosan nem épült meg, amíg
-> egyetlen valódi ügyfél van (lásd CLAUDE.md). De **ahogy megjön a 2. ügyfél, ez
-> az első dolog, amit meg kell építeni** – egy ügyfélnek nem lehet azt mondani,
-> hogy „írd be a teljes belső e-mail címedet".
+> 🧪 **Érdemes egyszer kipróbálni az „Elfelejtett jelszó" gombot is.** A levél csak
+> akkor jön meg, ha a Resend már be van kötve a Supabase-be (lásd CLAUDE.md
+> „Bejelentkezés és MFA"); ha nem jön, az nem az app hibája, hanem a beállítás hiányzik.
 
 **Amit látnod kell a B ablakban:**
-- A fejlécben `iroda · tulajdonos`.
+- A fejlécben `Kovács Iroda · tulajdonos`, és a **Kijelentkezés** gomb.
 - **Nincs Cégek fül** (az csak rendszergazdának jár, te itt csak cégtulajdonos vagy).
 - Törzsadatok → a példa-adatok ott vannak: 4 csapat, 4 helyszín, 5 feladat, 2 tablet.
 - Dolgozók: **üres** (a példa-adatok szándékosan nem tartalmaznak dolgozót).
@@ -200,25 +202,22 @@ a chipre kattintva visszanézhető.
 
 ---
 
-## 8. A próba-cég teljes törlése (5 perc)
+## 8. A próba-cég teljes törlése (3 perc) — *A ablak*
 
-> ⚠️ **A felületen NINCS cégtörlés gomb.** Sem a Cégek nézetben, sem a
-> rendszergazda-végponton – ez a funkció egyszerűen nincs megépítve. Ez a
-> forgatókönyv egyik legfontosabb tanulsága: **minden próba-ügyfél után SQL-ből
-> kell takarítani**, ami egy valódi üzemeltetésnél nem tartható.
+**8.1** Cégek → a Kovács Kft. sorában **Törlés**. A megerősítő ablak kiírja, mit visz
+el (dolgozók, események, bejelentkezési fiókok, feltöltött rajzok), és **be kell
+gépelni a cég pontos nevét**. **Végleges törlés**.
 
-**8.1** *A ablak* → Supabase Dashboard → **Storage** → `mk-rajzok` bucket →
-keresd meg a Kovács Kft. azonosítójával megegyező nevű mappát, és töröld.
-(Az SQL csak az adatbázis-sorokat viszi, a feltöltött fájlt nem.)
+**Amit látnod kell:** a lista újra egy sor, a BREMAT, változatlan dolgozó- és
+felhasználószámmal. A legelső céghez (és a saját cégedhez) szándékosan nincs Törlés
+gomb.
 
-**8.2** Supabase → **SQL Editor** → futtasd a `proba_ceg_torles.sql` scriptet.
-A cégnév a script elején állítható. A script **megtagadja a legelső (BREMAT) cég
-törlését** – ezt szándékosan építettem bele, és le is van tesztelve.
+**8.2** *B ablak* → F5 → a Kovács Kft. fiókja már nem tud belépni.
 
-**Amit látnod kell:** a záró lekérdezésben **egyetlen sor**, a BREMAT, változatlan
-dolgozó- és felhasználószámmal.
-
-**8.3** *B ablak* → F5 → a Kovács Kft. fiókja már nem tud belépni.
+**Tartalék, ha a felület valamiért nem törölne:** Supabase → **Storage** → `mk-rajzok`
+→ a cég azonosítójával megegyező mappa törlése, majd **SQL Editor** →
+`db/proba_ceg_torles.sql` (a cégnév a script elején állítható; a legelső cég
+törlését ez is megtagadja).
 
 ---
 
@@ -235,15 +234,15 @@ dolgozó- és felhasználószámmal.
 | 5 | Tablet végigjátszás | 10 p | | |
 | 6 | Élő nézet + riport + Excel | 5 p | | |
 | 7 | Licenc oda-vissza | 5 p | | |
-| 8 | Törlés | 5 p | | |
-| | **Összesen** | **64–74 p** | | |
+| 8 | Törlés | 3 p | | |
+| | **Összesen** | **62–72 p** | | |
 
 ### Amit a végén érdemes külön feljegyezni
 
 1. **A 3.4 tényleges ideje osztva 12-vel** → ennyi egy dolgozó felvétele. Szorozd
    be a valódi ügyfél létszámával; ez adja a bevezetés legnagyobb tételét.
 2. **Hányszor kellett SQL-hez nyúlni?** A cél az, hogy egy valódi ügyfélnél **nulla**
-   legyen. Ma legalább egyszer kell (8. lépés).
+   legyen – a cégtörlés óta a forgatókönyv SQL nélkül végigvihető.
 3. **Hányszor akadtál el olyanon, amit nem a forgatókönyvből tudtál?** Ami itt
    kiderül, az egy valódi ügyfélnél támogatási kérdés lesz.
 
@@ -255,8 +254,9 @@ Ezeket a kód ismeretében jelzem előre, nem a próba után:
 
 | Hol | Mi | Súly |
 |---|---|---|
-| 2. lépés | A bejelentkezéshez a **teljes e-mail címet** kell beírni, mert a domain beégetett. Cég-választó nincs. | **Ez blokkolja a 2. valódi ügyfelet** |
-| 8. lépés | **Nincs cégtörlés** sehol a felületen. | **Üzemeltetési hiány** |
+| ~~2. lépés~~ | ~~Beégetett bejelentkezési domain~~ – **megoldva** (e-mailes belépés, 2026. 09. 18.) | – |
+| ~~8. lépés~~ | ~~Nincs cégtörlés a felületen~~ – **megoldva** (Cégek → Törlés, 2026. 09. 18.) | – |
+| 2. lépés | Az „Elfelejtett jelszó" levél a Resend bekötéséig nem megy ki. | Konfigurációs függőség |
 | 3.4 | Nincs tömeges dolgozó-import. | Idő, lineárisan a létszámmal |
 | 0. és 5. | A service role kulcs hiánya a cég-létrehozást ÉS a tabletes rajzot is megfogja. | Konfigurációs csapda |
 | 4. | Ha nem mai napra szól a beosztás, a tablet üres. | Könnyű elrontani |

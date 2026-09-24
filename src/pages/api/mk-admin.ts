@@ -1,4 +1,4 @@
-// Munkakövetés – rendszergazda (platform admin) végpont: cégek listája, új cég
+// AndonWork – rendszergazda (platform admin) végpont: cégek listája, új cég
 // létrehozása az első felhasználójával, és a licenc állítása.
 //
 // Miért kell ehhez szerver:
@@ -214,7 +214,7 @@ const COMPANY_TABLES = [
  * Három védelem, mielőtt bármit törölnénk:
  *   1) a hívónak be kell gépelnie a cég pontos nevét (confirm_name),
  *   2) a saját cégét nem törölheti (nem lőheti ki maga alól a hozzáférést),
- *   3) a legelső (legrégebbi) céget nem törli – az a BREMAT, az éles ügyfél.
+ *   3) a legelső (legrégebbi) céget nem törli – az a BREMAT, az első éles ügyfél.
  *      Ha valaha tényleg azt kell törölni, az tudatos, kézi művelet legyen
  *      (db/proba_ceg_torles.sql), ne egy elgépelt kattintás következménye.
  *
@@ -307,7 +307,7 @@ async function listStorageFiles(key: string, prefix: string): Promise<string[]> 
     return files;
 }
 
-// Opcionális minta-törzsadat egy új cégnek (a mai BREMAT-mintát követi, az
+// Opcionális minta-törzsadat egy új cégnek (egy tipikus hegesztőüzem mintája, az
 // ügyfél átnevezheti). Ha a kapcsoló nincs bejelölve, a cég üresen indul.
 async function seedSampleData(key: string, companyId: string): Promise<void> {
     const teams = ['Hegesztők', 'Lakatosok', 'Raktár', 'Iroda'].map((name, i) => ({
