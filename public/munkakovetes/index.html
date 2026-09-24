@@ -1052,12 +1052,22 @@ async function createSupabaseAdapter() {
     // észrevétlen maradna – lásd a kereszt-teszt erre írt próbáját.
     // maybeSingle(), mert egy tiszta platform adminnak SZÁNDÉKOSAN nincs
     // cégprofilja (lásd CLAUDE.md "Szerepkörök").
-    const [profile, company, writeAllowed, platformAdmin] = await Promise.all([
+    //
+    // A négy lekérdezés FÜGGETLEN egymástól (allSettled, nem all): ha az egyik
+    // elbukik, attól a többi eredménye még érvényes. Korábban egyetlen hiba –
+    // pl. egy még le nem futtatott migráció hiányzó oszlopa a profil-
+    // lekérdezésben – az egész S.me-t elvitte, és vele a rendszergazda Cégek
+    // fülét is, holott a platform-admin lekérdezés maga sikerült. Egy profil
+    // nélküli rendszergazda így a cégkezeléshez sem fért hozzá. A hibát nem
+    // nyeljük el: a load_errors-ból az afterLogin látható bannert rak ki.
+    const settled = await Promise.allSettled([
       q(sb.from(T('profiles')).select('user_id,company_id,role,username,email,contact_email').eq('user_id', uid).maybeSingle()),
       q(sb.from(T('companies')).select('id,name,license_expires_at,active').maybeSingle()),
       q(sb.rpc('mk_write_allowed')),
       q(sb.rpc('mk_is_platform_admin')),
     ]);
+    const [profile, company, writeAllowed, platformAdmin] = settled.map(r => r.status === 'fulfilled' ? r.value : undefined);
+    const loadErrors = settled.filter(r => r.status === 'rejected').map(r => (r.reason && r.reason.message) || String(r.reason));
 
     meCache = {
       user_id: uid,
@@ -1067,8 +1077,11 @@ async function createSupabaseAdapter() {
       email: profile ? profile.email : null,
       contact_email: profile ? profile.contact_email : null,
       company: company || null,
-      write_allowed: writeAllowed === true,
+      // Ha a licenc-lekérdezés bukott el, nem tudjuk – ilyenkor a felület nem
+      // tilt (a DB úgyis kikényszeríti), csak a banner jelzi a hibát.
+      write_allowed: settled[2].status === 'fulfilled' ? writeAllowed === true : undefined,
       platform_admin: platformAdmin === true,
+      load_errors: loadErrors,
     };
     return meCache;
   };
@@ -1277,14 +1290,20 @@ const canWrite = () => !S.me || S.me.write_allowed !== false;
 const isOwner = () => !S.me || S.me.role === 'owner';
 const isPlatformAdmin = () => Boolean(S.me && S.me.platform_admin);
 
+// A jogosultsági adatok betöltésének hibája. Minden nézet fölött, a fejléc
+// alatt jelenik meg (renderShell), nem csak egyes nézetekben – korábban csak a
+// Heti terv és a Törzsadatok mutatta, így a nyitó Élő nézetben egy ilyen hiba
+// teljesen láthatatlan maradt.
+function meErrorNotice() {
+  if (!S.meError) return '';
+  return `<div class="license-banner me-error" role="alert">
+    <strong>A jogosultsági adatok egy része nem töltődött be.</strong> ${esc(S.meError)}
+    Ami ettől függ (pl. a Felhasználók fül vagy a licenc-állapot), az hiányozhat – ami sikerült, az működik.
+    Töltsd újra az oldalt; ha marad, szólj a fejlesztőnek.
+  </div>`;
+}
+
 function licenseNotice() {
-  if (S.meError) {
-    return `<div class="license-banner" role="status">
-      <strong>A jogosultsági adatok betöltése nem sikerült.</strong> ${esc(S.meError)}
-      Amíg ez fennáll, a szerepkörhöz kötött részek (Felhasználók, Cégek) nem jelennek meg.
-      Töltsd újra az oldalt; ha marad, szólj a fejlesztőnek.
-    </div>`;
-  }
   // Egy tiszta platform adminnak nincs cége – neki a licenc-banner értelmetlen.
   if (!S.me || !S.me.company || S.me.write_allowed !== false) return '';
   const c = S.me.company || {};
@@ -1325,6 +1344,9 @@ function renderShell() {
   bar.onclick = async ev => {
     if (ev.target.closest('[data-bar="logout"]')) { await S.api.signOut(); location.reload(); }
   };
+  const prev = document.querySelector('.me-error');
+  if (prev) prev.remove();
+  if (S.meError) bar.insertAdjacentHTML('afterend', meErrorNotice());
 }
 
 async function go(view) {
@@ -3430,7 +3452,9 @@ async function afterLogin() {
   // eltűnnének, magyarázat nélkül) – ez egy valódi hibánál meg is történt.
   try {
     S.me = await S.api.me();
-    S.meError = null;
+    // Részleges hiba: ami sikerült (pl. a rendszergazda-jelzés), az érvényes,
+    // de a hibát látni kell.
+    S.meError = S.me && S.me.load_errors && S.me.load_errors.length ? S.me.load_errors.join(' · ') : null;
   } catch (e) {
     S.me = null;
     S.meError = (e && e.message) || String(e);
