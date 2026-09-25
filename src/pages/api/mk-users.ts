@@ -24,6 +24,7 @@ import {
     normalizeEmail,
     serviceKey
 } from '../../lib/mk-supabase';
+import { authCreateError } from '../../lib/mk-admin-core';
 
 export const prerender = false;
 
@@ -85,12 +86,8 @@ async function createUser(key: string, companyId: string, body: any): Promise<Re
         body: JSON.stringify({ email, password, email_confirm: true })
     });
     if (!createRes.ok) {
-        const err: any = await createRes.json().catch(() => null);
-        const msg = (err && (err.msg || err.message)) || '';
-        if (/already/i.test(msg) || createRes.status === 422) {
-            return json({ error: 'Ezzel az e-mail címmel már van fiók.' }, 409);
-        }
-        return json({ error: 'Nem sikerült létrehozni a fiókot.' }, 500);
+        const err = authCreateError(createRes.status, await createRes.json().catch(() => null));
+        return json({ error: err.error }, err.status);
     }
     const created: any = await createRes.json();
 
