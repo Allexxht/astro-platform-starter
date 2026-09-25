@@ -37,9 +37,15 @@ jobs:
           node-version: 22
 
       - name: Supabase CLI telepítése
+        # Rögzített verzió, NEM „latest”: a „latest” feloldásához a telepítő a
+        # GitHub API-t kérdezi, és annak kéréskorlátja (rate limit) 2026.
+        # szeptember 25-én a kaput a tesztek előtt megállította. Rögzített
+        # verziónál a telepítő közvetlenül a kiadás fájlját tölti le, API-hívás
+        # nélkül. Frissíteni tudatosan kell: a verziót itt ÉS a lenti jobban is
+        # átírni, és a PR zöld CI-ja igazolja, hogy az új CLI-vel is megy.
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.117.0
 
       - name: Node függőségek telepítése
         run: npm ci
@@ -130,9 +136,10 @@ jobs:
           fetch-depth: 0
 
       - name: Supabase CLI telepítése
+        # Ugyanaz a rögzített verzió, mint a fenti jobban (lásd ott, miért).
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.117.0
 
       - name: Helyi Supabase projekt inicializálása (ha még nincs supabase/config.toml)
         run: |
