@@ -14,7 +14,9 @@
 //   • az animáció-beállítás mindkét irányba felülírja a rendszert, a CSS- és a
 //     JS-animációkra egyaránt;
 //   • a tömör sűrűség ténylegesen több sort ad;
-//   • ha a böngésző nem enged tárolni, a beállítás akkor is érvényes, hiba nélkül.
+//   • ha a böngésző nem enged tárolni, a beállítás akkor is érvényes, hiba nélkül;
+//   • a SÖTÉT témában is minden szöveg legalább 4,5:1 – az irodában és a tablet
+//     minden képernyőjén –, és a piros jelvény (elakadások száma) jól olvasható.
 //
 // Futtatás: node tests/client/settings.mjs (a környezeti változók: harness.mjs)
 import { openDemo, open, check, finish } from './harness.mjs';
@@ -199,6 +201,68 @@ await section(async () => {
   const bad = await auditText(t.page);
   check(a.theme === 'light' && bad.length === 0, 'a bejelentkező képernyő világos témában is olvasható', { a, bad: bad.slice(0, 3) });
   await t.page.close();
+});
+
+// 9) Sötét téma: minden szöveg legalább 4,5:1 (nagy szövegnél 3:1) – az irodai
+//    nézetekben ÉS a tablet minden képernyőjén (a Tablet fül előnézetében, ami a
+//    kioszkkal azonos stílusú). A piros jelvény (az elakadások száma) külön is:
+//    annak egy pillantásra olvashatónak kell lennie.
+await section(async () => {
+  const { page, context } = await openDemo('#live');
+  const bad = {};
+  const note = (where, list) => { if (list.length) bad[where] = list.slice(0, 4); };
+  for (const v of ['#live', '#plan', '#admin', '#reports', '#companies', '#settings']) {
+    await page.evaluate((h) => { location.hash = h; }, v);
+    await page.waitForTimeout(350);
+    note(v, await auditText(page, { skipDark: false }));
+    const rows = await page.$$('.row, .tbl tbody tr');
+    if (rows[1]) { await rows[1].hover(); note(v + ' (sor egér alatt)', await auditText(page, { skipDark: false })); }
+  }
+  await page.evaluate(() => {
+    document.getElementById('view').insertAdjacentHTML('afterbegin', `<p class="form-err">Hibaüzenet</p>
+      <table class="tbl rep-tbl"><tbody><tr class="rep-open"><td>Lezáratlan műszak</td></tr></tbody></table><button class="btn btn-danger">Törlés</button>`);
+  });
+  note('piros szövegek', await auditText(page, { skipDark: false }));
+  const badge = await page.evaluate(() => {
+    const cv = document.createElement('canvas'); cv.width = cv.height = 1; const cx = cv.getContext('2d', { willReadFrequently: true });
+    const rgb = (c) => { cx.fillStyle = c; cx.fillRect(0, 0, 1, 1); return [...cx.getImageData(0, 0, 1, 1).data].slice(0, 3); };
+    const lum = ([r, g, b]) => { const f = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+    const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+    const b = document.getElementById('alert-badge'); const cs = getComputedStyle(b);
+    return { hidden: b.hidden, text: +ratio(rgb(cs.color), rgb(cs.backgroundColor)).toFixed(2),
+      fill: +ratio(rgb(cs.backgroundColor), rgb(getComputedStyle(document.getElementById('bar')).backgroundColor)).toFixed(2) };
+  });
+  check(!badge.hidden && badge.text >= 4.5 && badge.fill >= 3, `sötét téma: a piros jelvény száma ${badge.text}:1, maga a jelvény ${badge.fill}:1 a fejlécen`, badge);
+
+  await page.evaluate(() => { location.hash = '#terminal'; });
+  await page.waitForSelector('#term-root .key');
+  const t = (sel) => page.click(`#term-root ${sel}`);
+  const pin = async (p) => { for (const d of p) await t(`.key[data-v="${d}"]`); await page.waitForTimeout(250); };
+  const again = async () => { if (await page.$('#term-root [data-t="reset"]')) { await t('[data-t="reset"]'); await pin('6666'); } };
+  const tab = async (n) => note('tablet: ' + n, await auditText(page, { skipDark: false }));
+  await tab('PIN');
+  await pin('3333'); await tab('elakadt dolgozó');
+  await page.reload(); await page.waitForSelector('#term-root .key');
+  await pin('6666'); await tab('kezdés előtt');
+  await t('[data-t="start-planned"]'); await page.waitForTimeout(250); await tab('visszaigazolás');
+  await again(); await tab('munka közben');
+  await t('[data-t="switch"]'); await page.waitForTimeout(200); await tab('darabszám');
+  if (await page.$('#term-root [data-t="qty-ok"]')) { await pin('12'); await t('[data-t="qty-ok"]'); }
+  await page.waitForTimeout(200); await tab('feladatválasztó');
+  await t('[data-t="pick"]'); await page.waitForTimeout(200); await tab('ok-választó');
+  if (await page.$('#term-root [data-t="reason"]')) await t('[data-t="reason"]');
+  await page.waitForTimeout(200); await again();
+  await t('[data-t="pause"]'); await page.waitForTimeout(200); await again(); await tab('szünetben');
+  if (await page.$('#term-root [data-t="resume"]')) { await t('[data-t="resume"]'); await page.waitForTimeout(200); await again(); }
+  await t('[data-t="block"]'); await page.waitForTimeout(200); await tab('elakadás oka');
+  await t('[data-t="reason"]'); await page.waitForTimeout(200); await again(); await tab('elakadva');
+  await t('[data-t="end"]'); await page.waitForTimeout(200);
+  if (await page.$('#term-root [data-t="qty-skip"]')) { await t('[data-t="qty-skip"]'); await page.waitForTimeout(200); }
+  await tab('lezárás');
+  if (await page.$('#term-root [data-t="confirm-end"]')) { await t('[data-t="confirm-end"]'); await page.waitForTimeout(200); }
+  await pin('9999'); await page.waitForTimeout(300); await tab('rossz PIN');
+  check(Object.keys(bad).length === 0, 'sötét téma: minden szöveg legalább 4,5:1 (nagy szövegnél 3:1) – irodai nézetek, sor egér alatt, piros szövegek, és a tablet minden képernyője', bad);
+  await context.close();
 });
 
 await finish();
