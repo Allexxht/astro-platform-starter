@@ -82,16 +82,24 @@ export function createClient() {
   };
 }`;
 
+// DEMÓ mód: ugyanaz az app, üres Supabase-kulcsokkal (memóriabeli mintaadat,
+// élő nézet, heti terv, tablet) – a /demo/munkakovetes/ útvonalon.
+const DEMO_INDEX = String(INDEX)
+  .replace(/SUPABASE_URL: '[^']*'/, "SUPABASE_URL: ''")
+  .replace(/SUPABASE_ANON_KEY: '[^']*'/, "SUPABASE_ANON_KEY: ''");
+
 const server = http.createServer((req, res) => {
   if (req.url.startsWith('/munkakovetes/')) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(INDEX); return; }
+  if (req.url.startsWith('/demo/munkakovetes/')) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(DEMO_INDEX); return; }
   res.writeHead(404); res.end();
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 export const BASE = `http://127.0.0.1:${server.address().port}/munkakovetes/`;
+export const DEMO_BASE = `http://127.0.0.1:${server.address().port}/demo/munkakovetes/`;
 
 export const browser = await chromium.launch(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' });
 
-export async function open(query, stub, { api } = {}) {
+export async function open(query, stub, { api, prefs } = {}) {
   const page = await browser.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
@@ -99,6 +107,7 @@ export async function open(query, stub, { api } = {}) {
   await page.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
   if (api) await page.route('**/api/mk-admin', api);
   await page.addInitScript((s) => { window.__stub = s; }, stub);
+  if (prefs) await page.addInitScript((p) => { localStorage.setItem('mk-prefs', JSON.stringify(p)); }, prefs);
   await page.goto(BASE + query);
   await page.waitForSelector('#l-save, #l-go, #bar:not([hidden])', { timeout: 10000 });
   await page.waitForTimeout(150);
@@ -120,6 +129,29 @@ export async function open(query, stub, { api } = {}) {
   return { page, state, submitPassword, errors };
 }
 
+// DEMÓ mód megnyitása. prefs: a böngészőben „előre elmentett” megjelenési
+// beállítások (localStorage), media: a rendszer beállításai (colorScheme,
+// reducedMotion), viewport: ablakméret, noStorage: a böngésző nem enged
+// tárolni (mint egy privát ablak tiltott tárolással – minden hívás kivételt dob).
+export async function openDemo(query = '', { prefs, media, viewport, noStorage } = {}) {
+  const context = await browser.newContext({ viewport: viewport || { width: 1400, height: 900 }, ...(media || {}) });
+  const page = await context.newPage();
+  page.setDefaultTimeout(5000);
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  await page.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
+  if (prefs) await page.addInitScript((p) => { try { localStorage.setItem('mk-prefs', JSON.stringify(p)); } catch (e) { /* nincs tárolás */ } }, prefs);
+  if (noStorage) {
+    await page.addInitScript(() => {
+      const deny = () => { throw new DOMException('A tárolás le van tiltva', 'SecurityError'); };
+      Object.defineProperty(window, 'localStorage', { configurable: true, get: deny });
+    });
+  }
+  await page.goto(DEMO_BASE + query);
+  await page.waitForSelector(query.includes('terminal=') ? '.term' : '#bar:not([hidden])', { timeout: 10000 });
+  await page.waitForTimeout(150);
+  return { page, context, errors };
+}
 
 export const results = [];
 export const check = (cond, m, extra) => results.push(`${cond ? '✅' : '❌'} ${m}${!cond && extra !== undefined ? ` – ${JSON.stringify(extra)}` : ''}`);

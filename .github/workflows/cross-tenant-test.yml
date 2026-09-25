@@ -96,14 +96,17 @@ jobs:
         # a szomszéd cég semmit nem veszít. Lásd tests/cross-tenant/company-admin.mjs.
         run: node tests/cross-tenant/company-admin.mjs
 
-      - name: Böngészős próbák (jelszó-visszaállítás, Cégek nézet)
+      - name: Böngészős próbák (jelszó-visszaállítás, Cégek nézet, Beállítások)
         # A futtató gépen lévő Chrome-mal (channel: chrome), a supabase-js
-        # helyett teszt-klienssel. A playwright-core csak ide települ, a
-        # package.json-ba nem – a Netlify buildet nem érinti.
+        # helyett teszt-klienssel (a Beállítások DEMÓ módban). A
+        # playwright-core csak ide települ, a package.json-ba nem – a Netlify
+        # buildet nem érinti. A settings.mjs a világos téma kontrasztját is
+        # méri minden irodai nézetben.
         run: |
           npm install --no-save --no-audit --no-fund playwright-core@1.63.0
           node tests/client/recovery.mjs
           node tests/client/companies.mjs
+          node tests/client/settings.mjs
 
       - name: Supabase stack leállítása
         if: always()
