@@ -5,24 +5,139 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#262d33">
 <title>AndonWork</title>
+<script>
+/* ===== Megjelenési beállítások (Beállítások fül) =====
+   Még az első kirajzolás ELŐTT fut, hogy világos témánál ne villanjon fel a
+   sötét. A böngészőben tárolódik (localStorage), nem az adatbázisban. Ha a
+   tárolás nem elérhető (privát ablak, tiltott süti), az alapértelmezés él.
+   A tablet (?terminal=…) kimarad: ott kötelezően sötét a téma, és a mozgás a
+   rendszer beállítását követi – a csarnokban ezt kell látni. */
+window.MK_PREFS = (() => {
+  const KEY = 'mk-prefs';
+  const DEFAULTS = { theme: 'dark', motion: 'system', density: 'normal' };
+  const CHOICES = { theme: ['dark', 'light', 'system'], motion: ['system', 'on', 'off'], density: ['normal', 'compact'] };
+  const kiosk = new URLSearchParams(location.search).has('terminal');
+  const lightMq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
+  function read() {
+    let p = {};
+    try { p = JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { p = {}; }
+    const out = {};
+    for (const k of Object.keys(DEFAULTS)) out[k] = CHOICES[k].includes(p[k]) ? p[k] : DEFAULTS[k];
+    return out;
+  }
+  function save(p) {
+    try { localStorage.setItem(KEY, JSON.stringify(p)); return true; } catch (e) { return false; }
+  }
+  const themeOf = p => (p.theme === 'system' ? (lightMq && lightMq.matches ? 'light' : 'dark') : p.theme);
+  function apply(p) {
+    if (kiosk) return;
+    const d = document.documentElement;
+    const theme = themeOf(p);
+    d.setAttribute('data-theme', theme);
+    if (p.density === 'compact') d.setAttribute('data-density', 'compact'); else d.removeAttribute('data-density');
+    if (p.motion === 'system') d.removeAttribute('data-motion'); else d.setAttribute('data-motion', p.motion);
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', theme === 'light' ? '#eceff1' : '#262d33');
+  }
+  apply(read());
+  return { DEFAULTS, kiosk, lightMq, read, save, apply, themeOf };
+})();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
-/* ===== Tokenek: horganyzott acél alap, izzó fém narancs, andon jelzőfények ===== */
-:root{
+/* ===== Tokenek: horganyzott acél alap, izzó fém narancs, andon jelzőfények =====
+   Sötét (alapértelmezett, és a tableten kötelező) és világos készlet. Minden
+   szín innen jön – a lenti szabályokban nincs beégetett szín, ami csak az
+   egyik háttéren működne. A .theme-dark a világos felületen belül is sötétet
+   ad: az irodai Tablet fül előnézete és a rajznéző a tabletet mutatja. */
+:root,.theme-dark{
   --bg:#262d33;       /* acéllemez */
   --panel:#2e363d;
   --raised:#39424a;
   --line:#4a555e;
+  --line-soft:rgba(74,85,94,.6);
+  --row-line:rgba(74,85,94,.55);
+  --field-line:#4a555e; /* beviteli mezők kerete */
   --muted:#99a6ae;
   --chalk:#eceee8;    /* zsírkréta fehér */
-  --hot:#ff7a1a;      /* izzó fém: márka, fókusz, elsődleges gomb */
+  --hot:#ff7a1a;      /* izzó fém: márka, elsődleges gomb, aktív fül, mai nap */
   --hot-ink:#221204;
+  --hot-text:#ff7a1a; /* narancs mint szöveg és fókuszkeret */
   --go:#35c46a;       /* andon zöld: dolgozik */
   --wait:#ffc933;     /* andon sárga: szünet */
   --stop:#ff4b3e;     /* andon piros: elakadt */
   --stop-bg:#3b2523;
+  --stop-line:#7a2e28;
+  --stop-stripe:#2a1513;
+  --stop-hi:#ffd9d5;  /* kiemelt szöveg piros alapon */
+  --offplan-line:#6f83a6;
+  --offplan:#bccbe6;
+  --lic-line:#8d6b2f;
+  --lic-bg:rgba(141,107,47,.18);
+  --lic-text:#e0b661;
+  --code-fg:#fff;
+  --code-bg:rgba(0,0,0,.25);
+  --hover:rgba(236,238,232,.03);
+  --hover-filter:brightness(1.1);
+  --today:rgba(255,122,26,.05);
+  --overlay:rgba(12,15,17,.64);
+  --shadow:0 18px 50px rgba(0,0,0,.45);
+  --task-l:1;         /* feladatszín világosságának felső korlátja (OKLCH), lásd lent */
+  color-scheme:dark;
+}
+/* A jelzőlámpák háza és fényei MINDKÉT témában ugyanazok: sötét házban
+   világító zöld/sárga/piros, fentről lefelé piros–sárga–zöld. Világos témában
+   is így marad, mert a sötétített andon-árnyalatok színtévesztő szemmel
+   összemosódnak – a lámpa helyzete és élénk fénye viszi az állapotot. */
+:root{
+  --housing:#1d2327;
+  --lamp-off:#3b454c;
+  --lamp-go:#35c46a;
+  --lamp-wait:#ffc933;
+  --lamp-stop:#ff4b3e;
+}
+/* Világos téma: hideg, acélos szürke alap. Minden szövegszín legalább 4,5:1 –
+   a sor hover-árnyalatán is –, a mezők kerete és a narancs jelölések legalább
+   3:1 a hátterükön (a számok: CLAUDE.md, „Dizájn”; a böngészős próba,
+   tests/client/settings.mjs, minden nézetben méri). */
+html[data-theme=light]{
+  --bg:#eceff1;
+  --panel:#f8f9fa;
+  --raised:#ffffff;
+  --line:#bac4cb;
+  --line-soft:rgba(28,35,40,.12);
+  --row-line:rgba(28,35,40,.12);
+  --field-line:#7d8a93;
+  --muted:#56626b;
+  --chalk:#1c2328;
+  --hot:#e0600a;
+  --hot-ink:#221204;
+  --hot-text:#a33f00;
+  --go:#0e7039;
+  --wait:#716200;
+  --stop:#c01f3a;
+  --stop-bg:#fbe9ea;
+  --stop-line:#e3a3ab;
+  --stop-stripe:#fbe9ea;
+  --stop-hi:#9c1a2f;
+  --offplan-line:#7d93b8;
+  --offplan:#3d5f94;
+  --lic-line:#c9a55c;
+  --lic-bg:#fbf3e2;
+  --lic-text:#7a5300;
+  --code-fg:#1c2328;
+  --code-bg:rgba(28,35,40,.08);
+  --hover:rgba(28,35,40,.04);
+  --hover-filter:brightness(.96);
+  --today:rgba(224,96,10,.07);
+  --overlay:rgba(28,35,40,.38);
+  --shadow:0 18px 50px rgba(28,35,40,.18);
+  --task-l:.6;
+  color-scheme:light;
+}
+:root{
   --font:'Barlow',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
   --cond:'Barlow Condensed','Barlow',system-ui,sans-serif;
   /* Mozgás: minden animáció 150–250 ms (a JS MOTION ugyanezeket használja) */
@@ -31,15 +146,17 @@
   --t-slow:250ms;     /* élő nézet: állapotváltás, új sor, átrendeződés */
   --ease-out:cubic-bezier(.2,.8,.2,1);
   --ease-in:cubic-bezier(.4,0,1,1);
-  color-scheme:dark;
 }
+/* A sötét sziget saját szövegszínt kap, különben a világos oldal sötét
+   szövegét örökölné a sötét hátterén. */
+.theme-dark{color:var(--chalk)}
 *{box-sizing:border-box}
 html,body{margin:0;min-height:100%}
 body{background:var(--bg);color:var(--chalk);font-family:var(--font);font-size:16px;line-height:1.45;
   -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
 button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer}
-:focus-visible{outline:3px solid var(--hot);outline-offset:2px}
+:focus-visible{outline:3px solid var(--hot-text);outline-offset:2px}
 [hidden]{display:none !important}
 .muted{color:var(--muted)}
 .small{font-size:14px}
@@ -49,11 +166,11 @@ button{cursor:pointer}
   background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
 .brand{display:flex;align-items:center;gap:10px}
 .brand-name{font-family:var(--cond);font-weight:700;font-size:23px;letter-spacing:.01em}
-.brand-mark{display:inline-flex;flex-direction:column;gap:2px;padding:3px;border-radius:4px;background:#1d2327}
+.brand-mark{display:inline-flex;flex-direction:column;gap:2px;padding:3px;border-radius:4px;background:var(--housing)}
 .brand-mark i{display:block;width:7px;height:7px;border-radius:50%}
-.brand-mark i:nth-child(1){background:var(--stop)}
-.brand-mark i:nth-child(2){background:var(--wait)}
-.brand-mark i:nth-child(3){background:var(--go)}
+.brand-mark i:nth-child(1){background:var(--lamp-stop)}
+.brand-mark i:nth-child(2){background:var(--lamp-wait)}
+.brand-mark i:nth-child(3){background:var(--lamp-go)}
 .brand-mark.big{padding:5px;gap:4px;border-radius:7px;align-self:flex-start}
 .brand-mark.big i{width:14px;height:14px}
 .tabs{display:flex;gap:2px;overflow-x:auto}
@@ -82,7 +199,7 @@ button{cursor:pointer}
 .btn-primary:hover{border-color:var(--hot);filter:brightness(1.07)}
 .btn-danger{background:transparent;border-color:var(--stop);color:var(--stop)}
 .datenav{display:flex;align-items:center;gap:6px}
-.date-input{min-height:38px;padding:0 10px;border-radius:8px;border:1px solid var(--line);background:var(--raised)}
+.date-input{min-height:38px;padding:0 10px;border-radius:8px;border:1px solid var(--field-line);background:var(--raised)}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
 .seg button{border:0;background:transparent;min-height:36px;padding:0 12px;color:var(--muted);font-weight:600}
 .seg button[aria-pressed=true]{background:var(--raised);color:var(--chalk)}
@@ -90,15 +207,15 @@ button{cursor:pointer}
 .empty{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:24px;border:1px dashed var(--line);border-radius:12px;color:var(--muted)}
 .empty p{margin:0}
 .tag{display:inline-block;padding:1px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);font-size:12.5px;font-weight:600;white-space:nowrap}
-.tag-offplan{border-color:#6f83a6;color:#bccbe6}
-.tag-warn{border-color:var(--hot);color:var(--hot)}
+.tag-offplan{border-color:var(--offplan-line);color:var(--offplan)}
+.tag-warn{border-color:var(--hot);color:var(--hot-text)}
 .swatch{display:inline-block;flex:none;width:12px;height:12px;border-radius:3px;background:var(--c,#9aa7b0)}
 
 /* ===== Élő nézet ===== */
-.alert{display:flex;margin-bottom:16px;border:1px solid #7a2e28;border-radius:10px;overflow:hidden;background:var(--stop-bg)}
-.alert-stripe{flex:none;width:14px;background:repeating-linear-gradient(-45deg,var(--stop) 0 8px,#2a1513 8px 16px)}
+.alert{display:flex;margin-bottom:16px;border:1px solid var(--stop-line);border-radius:10px;overflow:hidden;background:var(--stop-bg)}
+.alert-stripe{flex:none;width:14px;background:repeating-linear-gradient(-45deg,var(--stop) 0 8px,var(--stop-stripe) 8px 16px)}
 .alert-body{padding:10px 14px}
-.alert-body b{color:#ffd9d5}
+.alert-body b{color:var(--stop-hi)}
 .alert-body ul{margin:4px 0 0;padding-left:18px}
 .counts{display:flex;flex-wrap:wrap;gap:6px 20px;margin:0 0 18px;color:var(--muted)}
 .count{display:inline-flex;align-items:center;gap:7px}
@@ -109,18 +226,18 @@ button{cursor:pointer}
 .count.st-block i{background:var(--stop)}
 .count.st-done i{background:var(--muted)}
 .count.st-off i{background:transparent;border:2px solid var(--muted)}
-.warn-line{margin:-6px 0 16px;color:var(--hot);font-weight:600}
+.warn-line{margin:-6px 0 16px;color:var(--hot-text);font-weight:600}
 .group{margin-bottom:24px}
 .group-title{display:flex;align-items:baseline;gap:8px;margin:0 0 4px;padding-bottom:6px;border-bottom:1px solid var(--line);
   font-family:var(--cond);font-weight:600;font-size:21px}
 .group-n{font-family:var(--font);font-size:14px;font-weight:500;color:var(--muted)}
-.row{border-bottom:1px solid rgba(74,85,94,.55)}
+.row{border-bottom:1px solid var(--row-line)}
 .row-main{display:grid;grid-template-columns:auto minmax(150px,1.1fr) minmax(200px,2fr) 110px 150px 76px;align-items:center;gap:14px;padding:10px 4px}
-.stack{display:inline-flex;flex-direction:column;gap:3px;padding:4px;border-radius:6px;background:#1d2327}
-.stack i{display:block;width:10px;height:10px;border-radius:50%;background:#3b454c}
-.st-block .stack .l-red{background:var(--stop);box-shadow:0 0 9px var(--stop)}
-.st-pause .stack .l-amber{background:var(--wait);box-shadow:0 0 9px var(--wait)}
-.st-work .stack .l-green{background:var(--go);box-shadow:0 0 9px var(--go)}
+.stack{display:inline-flex;flex-direction:column;gap:3px;padding:4px;border-radius:6px;background:var(--housing)}
+.stack i{display:block;width:10px;height:10px;border-radius:50%;background:var(--lamp-off)}
+.st-block .stack .l-red{background:var(--lamp-stop);box-shadow:0 0 9px var(--lamp-stop)}
+.st-pause .stack .l-amber{background:var(--lamp-wait);box-shadow:0 0 9px var(--lamp-wait)}
+.st-work .stack .l-green{background:var(--lamp-go);box-shadow:0 0 9px var(--lamp-go)}
 .who{display:flex;flex-direction:column;min-width:0}
 .who .name{font-weight:600;font-size:17px}
 .who .state{font-size:14px;color:var(--muted)}
@@ -149,8 +266,8 @@ button{cursor:pointer}
 .pcorner{position:sticky;left:0;z-index:2;justify-content:flex-end;color:var(--muted);font-size:13px}
 .pteam{grid-column:1/-1;padding:12px 10px 4px;border-bottom:1px solid var(--line);font-family:var(--cond);font-weight:600;font-size:18px;color:var(--muted)}
 .pname{position:sticky;left:0;z-index:1;display:flex;align-items:center;padding:8px 10px;border-bottom:1px solid var(--line);background:var(--panel);font-weight:600}
-.pcell{display:flex;flex-direction:column;gap:4px;min-height:50px;padding:6px;border-bottom:1px solid var(--line);border-left:1px solid rgba(74,85,94,.6)}
-.pcell.is-today{background:rgba(255,122,26,.05)}
+.pcell{display:flex;flex-direction:column;gap:4px;min-height:50px;padding:6px;border-bottom:1px solid var(--line);border-left:1px solid var(--line-soft)}
+.pcell.is-today{background:var(--today)}
 .chip{display:flex;align-items:flex-start;gap:4px;padding:4px 2px 4px 8px;border-left:4px solid var(--c);border-radius:6px;
   background:var(--raised);background:color-mix(in srgb,var(--c) 15%,var(--panel));font-size:14px;font-weight:600;line-height:1.25}
 .chip-open{all:unset;flex:1;min-width:0;cursor:pointer}
@@ -162,13 +279,25 @@ button{cursor:pointer}
 .cell-add{min-height:28px;border:1px dashed var(--line);border-radius:6px;background:transparent;color:var(--muted);font-size:18px;opacity:.45}
 .pcell:hover .cell-add,.cell-add:focus-visible{opacity:1}
 @media (hover:none){.chip-x,.cell-add{opacity:1}}
+/* Feladatszínek világos témában. A színeket a felhasználó választja, és sötét
+   háttérre valók: világos panelen a halványak (pl. #c7cdd1, 1,5:1) szinte
+   eltűnnének. Ezért a csík és a színminta világosságát OKLCH-ban 0,6-ra
+   korlátozzuk: a színezet és a telítettség marad (a narancs narancs marad, nem
+   barnul be), a már elég sötét színek egyáltalán nem változnak, és mind
+   legalább 3,5:1 a panelen. Az adatbázisban tárolt szín nem változik. A sötét
+   szigeten (.theme-dark: Tablet fül, rajznéző) --task-l 1, ott nincs korlát.
+   Régebbi böngészőben (relatív színszintaxis nélkül) a nyers szín marad. */
+@supports (color: oklch(from red l c h)){
+  html[data-theme=light] .swatch,html[data-theme=light] .swatch-pick{background:oklch(from var(--c,#9aa7b0) min(l, var(--task-l)) c h)}
+  html[data-theme=light] .chip,html[data-theme=light] .tp-item,html[data-theme=light] .tp-item:hover{border-left-color:oklch(from var(--c) min(l, var(--task-l)) c h)}
+}
 
 /* ===== Lejárt licenc: csak olvasható mód ===== */
 /* Szándékosan NEM andon-szín (--go/--wait/--stop): azok kizárólag a dolgozó
    munkaállapotát jelölik, egy előfizetési figyelmeztetés nem az. */
-.license-banner{margin:0 0 16px;padding:12px 14px;border-radius:10px;border:1px solid #8d6b2f;
-  background:rgba(141,107,47,.18);color:var(--chalk);line-height:1.5;max-width:100ch}
-.license-banner strong{color:#e0b661}
+.license-banner{margin:0 0 16px;padding:12px 14px;border-radius:10px;border:1px solid var(--lic-line);
+  background:var(--lic-bg);color:var(--chalk);line-height:1.5;max-width:100ch}
+.license-banner strong{color:var(--lic-text)}
 
 /* ===== Lemaradt adatbázis (séma-verzió, 006) ===== */
 /* Szándékosan harsány, és a fejléc FÖLÖTT, a bejelentkező képernyőn is
@@ -176,9 +305,9 @@ button{cursor:pointer}
    illik össze – ilyenkor több funkció csendben hibázhat (lásd a 005 esetét). */
 #schema-alert{position:relative;z-index:30;padding:14px 20px;background:var(--stop-bg);
   border-bottom:3px solid var(--stop);color:var(--chalk);line-height:1.5}
-#schema-alert h2{margin:0 0 6px;font-family:var(--cond);font-size:22px;letter-spacing:.02em;color:#ffd5d1}
+#schema-alert h2{margin:0 0 6px;font-family:var(--cond);font-size:22px;letter-spacing:.02em;color:var(--stop-hi)}
 #schema-alert ol{margin:6px 0;padding-left:24px}
-#schema-alert code{font-size:15px;font-weight:700;color:#fff;background:rgba(0,0,0,.25);padding:1px 6px;border-radius:4px;overflow-wrap:anywhere}
+#schema-alert code{font-size:15px;font-weight:700;color:var(--code-fg);background:var(--code-bg);padding:1px 6px;border-radius:4px;overflow-wrap:anywhere}
 .schema-list code{overflow-wrap:anywhere}
 #schema-alert p{margin:4px 0;max-width:110ch}
 body.kiosk #schema-alert{display:none}
@@ -194,14 +323,14 @@ body.kiosk #schema-alert{display:none}
 .tbl-wrap{overflow-x:auto}
 .tbl{width:100%;border-collapse:separate;border-spacing:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
 .tbl th{padding:10px 12px;text-align:left;font-size:13px;font-weight:600;color:var(--muted);background:var(--raised);border-bottom:1px solid var(--line)}
-.tbl td{padding:10px 12px;border-bottom:1px solid rgba(74,85,94,.6);vertical-align:middle}
+.tbl td{padding:10px 12px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
 .tbl tr:last-child td{border-bottom:0}
 .tbl tr.is-off td{color:var(--muted)}
 .tbl td .swatch{margin-right:8px;vertical-align:-1px}
 .tbl .actions{text-align:right;white-space:nowrap}
 .tbl .actions .btn{margin-left:6px}
 .clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:60ch}
-.link-input{width:100%;min-width:240px;padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--muted);font-size:13px}
+.link-input{width:100%;min-width:240px;padding:6px 8px;border-radius:6px;border:1px solid var(--field-line);background:var(--bg);color:var(--muted);font-size:13px}
 
 /* ===== Riportok ===== */
 .reports-toolbar{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 16px;margin-bottom:12px}
@@ -216,8 +345,8 @@ body.kiosk #schema-alert{display:none}
 .rep-tbl tr.rep-noshow td:first-child,.rep-tbl tr.rep-offplan td:first-child{box-shadow:inset 3px 0 0 var(--hot)}
 
 /* ===== Modal, űrlap, toast ===== */
-.backdrop{position:fixed;inset:0;z-index:50;display:flex;align-items:flex-start;justify-content:center;padding:6vh 16px;overflow:auto;background:rgba(12,15,17,.64)}
-.modal{width:min(580px,100%);background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,.45)}
+.backdrop{position:fixed;inset:0;z-index:50;display:flex;align-items:flex-start;justify-content:center;padding:6vh 16px;overflow:auto;background:var(--overlay)}
+.modal{width:min(580px,100%);background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
 .modal-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line)}
 .modal-head h2{margin:0;font-family:var(--cond);font-weight:600;font-size:23px;line-height:1.15}
 .icon-btn{width:36px;height:36px;border:0;border-radius:8px;background:transparent;color:var(--muted);font-size:26px;line-height:1}
@@ -226,7 +355,7 @@ body.kiosk #schema-alert{display:none}
 .modal-foot{display:flex;justify-content:flex-end;gap:10px;padding:12px 18px;border-top:1px solid var(--line)}
 .field{display:flex;flex-direction:column;gap:5px}
 .field>span{font-size:14px;font-weight:600;color:var(--muted)}
-.field input,.field select,.field textarea{min-height:40px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg)}
+.field input,.field select,.field textarea{min-height:40px;padding:8px 10px;border-radius:8px;border:1px solid var(--field-line);background:var(--bg)}
 .check{display:flex;align-items:center;gap:10px}
 .check input{width:20px;height:20px;accent-color:var(--hot)}
 .form-err{margin:0;color:var(--stop);font-weight:600;white-space:pre-line}
@@ -235,7 +364,7 @@ body.kiosk #schema-alert{display:none}
 .tp-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:6px}
 .tp-item{padding:10px;text-align:left;border:1px solid var(--line);border-left:4px solid var(--c);border-radius:8px;background:var(--raised);font-weight:600}
 .tp-item:hover{border-color:var(--muted);border-left-color:var(--c)}
-.pin-show{margin:0;font-family:var(--cond);font-size:60px;font-weight:700;letter-spacing:.18em;color:var(--hot)}
+.pin-show{margin:0;font-family:var(--cond);font-size:60px;font-weight:700;letter-spacing:.18em;color:var(--hot-text)}
 .file-drop{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 .file-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
 .file-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
@@ -279,7 +408,7 @@ input[type=color]{width:44px;height:32px;padding:0;border:1px solid var(--line);
 .term-clock{font-family:var(--cond);font-weight:600;font-size:2.2em;line-height:1}
 .term-body{flex:1;display:flex;flex-direction:column;gap:.8em;min-height:0;padding:1em 1.3em;overflow:auto}
 .term.is-busy .term-body{opacity:.55;pointer-events:none}
-.term-err{position:absolute;left:1em;right:1em;bottom:1em;padding:.6em .9em;border:1px solid var(--stop);border-radius:.6em;background:var(--stop-bg);color:#ffd9d5;font-weight:600}
+.term-err{position:absolute;left:1em;right:1em;bottom:1em;padding:.6em .9em;border:1px solid var(--stop);border-radius:.6em;background:var(--stop-bg);color:var(--stop-hi);font-weight:600}
 .term-fatal{align-items:center;justify-content:center;padding:2em;text-align:center}
 .t-h1{margin:0;font-family:var(--cond);font-weight:700;font-size:2.4em;line-height:1.05}
 .t-h2{margin:0;font-family:var(--cond);font-weight:600;font-size:1.8em;line-height:1.1}
@@ -296,7 +425,7 @@ input[type=color]{width:44px;height:32px;padding:0;border:1px solid var(--line);
 .t-switch{border-color:var(--muted)}
 .t-end{background:transparent;border-color:var(--muted)}
 .t-end-solid{background:var(--chalk);border-color:var(--chalk);color:var(--bg)}
-.t-block-soft{background:var(--stop-bg);border-color:#7a2e28}
+.t-block-soft{background:var(--stop-bg);border-color:var(--stop-line)}
 .t-actions{display:grid;grid-template-columns:1fr 1fr;gap:.6em;margin-top:auto}
 .t-actions .t-btn{min-height:3.6em;font-size:1.25em}
 .t-actions.three .t-btn:first-child{grid-column:1/-1}
@@ -394,9 +523,9 @@ body.kiosk .view{display:flex;flex-direction:column;max-width:none;height:100vh;
 .cell-add:hover{color:var(--chalk);border-color:var(--muted)}
 /* A chip és a sor mozgását (be-, kiúszás, átrendeződés) JS indítja – ide csak a hover kell. */
 .chip{transition:filter var(--t-fast) ease}
-.chip:hover{filter:brightness(1.1)}
+.chip:hover{filter:var(--hover-filter)}
 .row,.tbl tbody td{transition:background-color var(--t-fast) ease}
-.row:hover,.tbl tbody tr:hover td{background-color:rgba(236,238,232,.03)}
+.row:hover,.tbl tbody tr:hover td{background-color:var(--hover)}
 @keyframes mk-fade{from{opacity:0}}
 @keyframes mk-fade-out{to{opacity:0}}
 @keyframes mk-rise{from{opacity:0;transform:translateY(8px) scale(.985)}}
@@ -413,6 +542,49 @@ body.kiosk .view{display:flex;flex-direction:column;max-width:none;height:100vh;
 .backdrop.is-handoff{animation:none}
 .backdrop.is-leaving{animation:mk-fade-out var(--t-fast) var(--ease-in) forwards;pointer-events:none}
 .backdrop.is-leaving .modal{animation:mk-sink var(--t-fast) var(--ease-in) forwards}
+
+/* ===== Tömör sűrűség (Beállítások) =====
+   Nagy képernyőn több sor férjen ki a heti tervbe, az élő nézetbe és a
+   táblázatokba: kisebb térköz és sormagasság, a betűméret alig változik. Csak
+   irodai elemek – a tablet (.term) szándékosan kimarad. */
+html[data-density=compact] .view{padding:12px 16px 40px}
+html[data-density=compact] .toolbar{margin-bottom:10px}
+html[data-density=compact] .counts{margin-bottom:10px}
+html[data-density=compact] .group{margin-bottom:14px}
+html[data-density=compact] .group-title{font-size:18px;padding-bottom:3px}
+html[data-density=compact] .row-main{gap:10px;padding:4px}
+html[data-density=compact] .who .name{font-size:15px}
+html[data-density=compact] .who .state,html[data-density=compact] .tot{font-size:13px}
+html[data-density=compact] .row-main .stack{gap:2px;padding:3px}  /* a lámpák sorrendje és iránya marad */
+html[data-density=compact] .stack i{width:8px;height:8px}
+html[data-density=compact] .row-detail{padding-bottom:10px}
+html[data-density=compact] .pgrid{grid-template-columns:160px repeat(var(--days),minmax(130px,1fr));min-width:calc(160px + var(--days) * 130px)}
+html[data-density=compact] .phead{padding:4px 8px}
+html[data-density=compact] .pteam{padding:6px 8px 2px;font-size:16px}
+html[data-density=compact] .pname{padding:2px 8px;font-size:14px}
+html[data-density=compact] .pcell{gap:2px;min-height:28px;padding:2px 3px}
+html[data-density=compact] .chip{padding:1px 1px 1px 6px;border-left-width:3px;font-size:13px;line-height:1.2}
+html[data-density=compact] .chip-text small{font-size:12px}
+html[data-density=compact] .cell-add{min-height:20px;font-size:15px;line-height:1}
+html[data-density=compact] .tbl th,html[data-density=compact] .tbl td{padding:5px 10px}
+html[data-density=compact] .subtabs{margin-bottom:10px}
+html[data-density=compact] .subtabs button{padding:6px 12px}
+
+/* ===== Beállítások ===== */
+.settings{display:flex;flex-direction:column;gap:18px;max-width:760px}
+.set-group{margin:0;padding:16px 18px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.set-group legend{padding:0 6px;font-family:var(--cond);font-weight:600;font-size:21px}
+.set-group>p{margin:0 0 12px;color:var(--muted);max-width:70ch}
+.set-opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px}
+.set-opt{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);cursor:pointer;
+  transition:border-color var(--t-fast) ease,box-shadow var(--t-fast) ease}
+.set-opt:hover{border-color:var(--field-line)}
+.set-opt input{flex:none;width:18px;height:18px;margin:2px 0 0;accent-color:var(--hot)}
+.set-opt:has(input:checked){border-color:var(--hot);box-shadow:inset 0 0 0 1px var(--hot)}
+.set-opt:has(input:focus-visible){outline:3px solid var(--hot-text);outline-offset:2px}
+.set-opt b{display:block;font-weight:600}
+.set-opt small{display:block;color:var(--muted);font-size:13.5px;line-height:1.35}
+.set-note{margin:0;color:var(--muted);font-size:14px}
 
 /* ===== Reszponzív ===== */
 @container (max-width:640px){
@@ -434,10 +606,17 @@ body.kiosk .view{display:flex;flex-direction:column;max-width:none;height:100vh;
   .row-detail{grid-template-columns:1fr;padding-left:34px}
   .admin-head{flex-direction:column}
 }
+/* Mozgás ki: a rendszer mozgáscsökkentése, HACSAK a Beállításokban nincs
+   kifejezetten bekapcsolva (data-motion=on) – vagy a Beállításokban kikapcsolva
+   (data-motion=off), a rendszertől függetlenül. A JS-ből indított animációkra
+   ez nem hat, azokat a motionOK() kapcsolja ugyanezen döntés szerint. A tableten
+   nincs data-motion, ott a rendszer beállítása dönt. */
 @media (prefers-reduced-motion:reduce){
-  *,*::before,*::after{animation:none !important;transition:none !important}
-  .done-check path{stroke-dashoffset:0}
+  html:not([data-motion=on]) *,html:not([data-motion=on]) *::before,html:not([data-motion=on]) *::after{animation:none !important;transition:none !important}
+  html:not([data-motion=on]) .done-check path{stroke-dashoffset:0}
 }
+html[data-motion=off] *,html[data-motion=off] *::before,html[data-motion=off] *::after{animation:none !important;transition:none !important}
+html[data-motion=off] .done-check path{stroke-dashoffset:0}
 
 /* ===== Nyomtatás: riportok, fekvő A4 ===== */
 @media print{
@@ -1418,14 +1597,21 @@ const errorBox = e => `<div class="empty"><p>Hiba történt: ${esc(e && e.messag
    Minden animáció 150–250 ms, csak az irodai felületen (a CSS „Mozgás”
    szakaszával és a --t-* tokenekkel egyezően). A tablet szándékosan kimarad:
    kioszk módban és az irodai Tablet fülön semmi nem mozog, ott a gombnyomás
-   visszajelzése azonnali. Mozgáscsökkentésnél (prefers-reduced-motion) sem: a
-   CSS-animációkat a @media szabály kapcsolja ki, a JS-ből (Web Animations
-   API) indítottakat ez a motionOK() – azokra a CSS-szabály nem hat. */
+   visszajelzése azonnali. Hogy mozog-e az irodai felület, azt a Beállítások
+   „Animációk” pontja dönti el (alapból a rendszer mozgáscsökkentése, de
+   mindkét irányba felülírható). A CSS-animációkat a html data-motion
+   attribútuma + a @media szabály kapcsolja, a JS-ből (Web Animations API)
+   indítottakat ez a motionOK() – azokra a CSS-szabály nem hat, ezért a kettő
+   ugyanazt a motionWanted() döntést követi. */
 const MOTION = { fast: 150, base: 200, slow: 250 };
 const EASE_OUT = 'cubic-bezier(.2,.8,.2,1)';
 const EASE_IN = 'cubic-bezier(.4,0,1,1)';
 const reducedMotion = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
-const motionOK = () => !S.kiosk && !(reducedMotion && reducedMotion.matches);
+const PREFS = window.MK_PREFS;
+let prefs = PREFS.read();
+const systemReducesMotion = () => Boolean(reducedMotion && reducedMotion.matches);
+const motionWanted = () => (prefs.motion === 'on' ? true : prefs.motion === 'off' ? false : !systemReducesMotion());
+const motionOK = () => !S.kiosk && motionWanted();
 
 // Egy CSS-animáció újraindítása osztállyal (pl. nézetváltáskor a beúszás).
 function playClass(el, cls) {
@@ -1439,7 +1625,7 @@ function playClass(el, cls) {
 const animateEl = (el, keyframes, opts) => (el && el.animate && motionOK() ? el.animate(keyframes, opts) : null);
 
 /* ---------- Keret és navigáció ---------- */
-const VIEWS = ['live', 'plan', 'admin', 'reports', 'terminal', 'companies'];
+const VIEWS = ['live', 'plan', 'admin', 'reports', 'terminal', 'companies', 'settings'];
 
 /* Írható-e most bármi. A DB is kikényszeríti (lásd 004 migráció) – ez itt csak
    azért van, hogy a felület ne engedjen olyan gombot megnyomni, ami úgyis
@@ -1495,6 +1681,7 @@ function renderShell() {
       <a href="#reports" data-nav="reports">Riportok</a>
       <a href="#terminal" data-nav="terminal">Tablet</a>
       ${isPlatformAdmin() ? '<a href="#companies" data-nav="companies">Cégek</a>' : ''}
+      <a href="#settings" data-nav="settings">Beállítások</a>
     </nav>
     <div class="bar-end">${S.api.mode === 'demo'
       ? '<span class="mode" title="Az adatok csak ebben a böngészőben élnek, újratöltéskor visszaállnak.">Demó adatok</span>'
@@ -1525,6 +1712,7 @@ async function go(view) {
     else if (view === 'admin') { await loadUsersIfNeeded(); renderAdmin(); }
     else if (view === 'reports') { await loadReports(); renderReports(); }
     else if (view === 'companies') { S.companies = await S.api.listCompanies(); renderCompanies(); }
+    else if (view === 'settings') renderSettings();
     else await renderTerminalTab();
   } catch (e) { v.innerHTML = errorBox(e); }
   if (fade) playClass(v, 'fade-in');
@@ -2904,6 +3092,81 @@ async function exportReportsExcel() {
   }
 }
 
+/* ---------- BEÁLLÍTÁSOK ----------
+   Megjelenés: téma, animációk, sűrűség. A böngészőben tárolódik (lásd a
+   <head> MK_PREFS scriptjét), nem az adatbázisban, és csak az irodai
+   felületre vonatkozik – a tablet kioszk módban nem olvassa. Minden változás
+   azonnal él, újratöltés nélkül. */
+const SETTINGS = [
+  { key: 'theme', title: 'Téma', hint: 'A tabletekre nem vonatkozik: a csarnokban mindig a sötét téma látszik, és az irodai Tablet fül előnézete is azt mutatja.',
+    opts: [
+      ['dark', 'Sötét', () => 'Acélszürke alap, narancs kiemeléssel. Ez az alapértelmezés.'],
+      ['light', 'Világos', () => 'Világos alap – világos irodában, nappali fényben kényelmesebb.'],
+      ['system', 'Rendszer szerint', () => `A számítógép beállítását követi (most: ${PREFS.lightMq && PREFS.lightMq.matches ? 'világos' : 'sötét'}).`],
+    ] },
+  { key: 'motion', title: 'Animációk', hint: 'Rövid, halk átmenetek (150–250 ms): felugró ablakok, nézetváltás, az élő nézet átrendeződése, a heti terv beosztásai.',
+    opts: [
+      ['system', 'Rendszer szerint', () => `A számítógép „mozgás csökkentése” beállítását követi (most: ${systemReducesMotion() ? 'ki' : 'be'}).`],
+      ['on', 'Be', () => 'Akkor is, ha a számítógépen a mozgás csökkentése be van kapcsolva.'],
+      ['off', 'Ki', () => 'Semmi nem mozog, minden azonnal vált.'],
+    ] },
+  { key: 'density', title: 'Sűrűség', hint: 'A heti tervre, az élő nézetre és a táblázatokra hat.',
+    opts: [
+      ['normal', 'Normál', () => 'Kényelmes térköz, nagyobb sorok.'],
+      ['compact', 'Tömör', () => 'Kisebb sorok, kevesebb térköz – nagy képernyőn több sor fér ki.'],
+    ] },
+];
+let prefsUnsaved = false;
+
+function renderSettings() {
+  $('#view').innerHTML = `<section class="settings">
+    <div class="toolbar"><h1 class="view-title">Beállítások</h1></div>
+    ${SETTINGS.map(g => `<fieldset class="set-group">
+      <legend>${g.title}</legend>
+      <p>${g.hint}</p>
+      <div class="set-opts">${g.opts.map(([val, label, desc]) => `<label class="set-opt">
+        <input type="radio" name="${g.key}" value="${val}" data-change="pref" ${prefs[g.key] === val ? 'checked' : ''}>
+        <span><b>${label}</b><small data-desc="${g.key}-${val}">${esc(desc())}</small></span></label>`).join('')}</div>
+    </fieldset>`).join('')}
+    <p class="set-note" id="set-note">${settingsNote()}</p>
+  </section>`;
+}
+
+const settingsNote = () => (prefsUnsaved
+  ? 'Ebben a böngészőben a beállítás nem menthető (pl. privát ablakban) – most érvényes, de újratöltéskor visszaáll az alapértelmezésre.'
+  : 'A beállítások csak ebben a böngészőben tárolódnak: másik gépen vagy böngészőben külön kell beállítani.');
+
+function setPref(key, value) {
+  if (!(key in PREFS.DEFAULTS)) return;
+  prefs = { ...prefs, [key]: value };
+  prefsUnsaved = !PREFS.save(prefs);
+  PREFS.apply(prefs);
+  const note = $('#set-note');
+  if (note) note.textContent = settingsNote();
+}
+
+// A „Rendszer szerint” leírása („most: …”) élőben kövesse a rendszert, és a
+// rendszer szerinti téma váltson is, ha közben a számítógépen átállítják.
+function refreshSystemDependent() {
+  if (S.kiosk) return;
+  if (prefs.theme === 'system') PREFS.apply(prefs);
+  if (S.view !== 'settings') return;
+  for (const g of SETTINGS) for (const [val, , desc] of g.opts) {
+    const el = document.querySelector(`[data-desc="${g.key}-${val}"]`);
+    if (el) el.textContent = desc();
+  }
+}
+const onMqChange = (mq, fn) => { if (mq && mq.addEventListener) mq.addEventListener('change', fn); };
+onMqChange(PREFS.lightMq, refreshSystemDependent);
+onMqChange(reducedMotion, refreshSystemDependent);
+// Másik lapon átállítva ez a lap is kövesse.
+window.addEventListener('storage', ev => {
+  if (S.kiosk || (ev.key !== null && ev.key !== 'mk-prefs')) return;
+  prefs = PREFS.read();
+  PREFS.apply(prefs);
+  if (S.view === 'settings') renderSettings();
+});
+
 /* ---------- TABLET (terminál) ----------
    Képernyők: pin → home → (pick / reason / qty / confirm) → done → pin
    A tablet állapotot nem tárol: minden gombnyomás után a szerver
@@ -2921,7 +3184,7 @@ async function renderTerminalTab() {
       ${pins ? `<div class="pinlist"><h2>Demó PIN kódok</h2><table>${pins.map(p => `<tr><td>${esc(p.name)}</td><td>${esc(p.pin)}</td></tr>`).join('')}</table></div>
         <p class="muted small">Próbáld ki: Szabó János (3333) anyaghiány miatt elakadt. Oldd fel az elakadást a tableten, aztán nézd meg az Élő nézetet. A PIN-t a billentyűzetről is beírhatod.</p>` : ''}
     </aside>
-    <div class="tablet"><div class="tablet-screen term-host" id="term-root"></div></div>
+    <div class="tablet theme-dark"><div class="tablet-screen term-host" id="term-root"></div></div>
   </section>`;
   if (S.termPreviewId) await startTerminal(S.termPreviewId, $('#term-root'));
   else $('#term-root').innerHTML = '<div class="term term-fatal"><p>Nincs aktív tablet. A Törzsadatok oldal Tabletek fülén tudsz felvenni.</p></div>';
@@ -3216,7 +3479,7 @@ async function openAttachmentViewer(attachmentId) {
   const a = (t.ses.assignments || []).find(x => (x.attachments || []).some(f => f.id === attachmentId));
   const file = a && a.attachments.find(f => f.id === attachmentId);
   const node = document.createElement('div');
-  node.className = 'attview';
+  node.className = 'attview theme-dark';   // a rajznéző a tableté: világos témában is sötét
   document.body.appendChild(node);
   t.viewer = { id: attachmentId, file, loading: true, error: null, url: null, isPdf: file ? isPdfFile(file) : false, page: 1, numPages: 1, pdf: null, node };
   clearTimeout(t.timers.idle);
@@ -3732,6 +3995,8 @@ function onViewChange(ev) {
     S.live.date = el.value > todayKey() ? todayKey() : el.value;
     S.live.open.clear();
     reloadLive();
+  } else if (el.dataset.change === 'pref') {
+    setPref(el.name, el.value);
   } else if (el.dataset.change === 'term-select') {
     S.termPreviewId = el.value;
     startTerminal(el.value, $('#term-root'));
