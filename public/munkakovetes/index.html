@@ -229,7 +229,7 @@ body.kiosk #schema-alert{display:none}
 .field input,.field select,.field textarea{min-height:40px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg)}
 .check{display:flex;align-items:center;gap:10px}
 .check input{width:20px;height:20px;accent-color:var(--hot)}
-.form-err{margin:0;color:var(--stop);font-weight:600}
+.form-err{margin:0;color:var(--stop);font-weight:600;white-space:pre-line}
 .task-picker{display:flex;flex-direction:column;gap:12px}
 .tp-group h3{margin:0 0 6px;font-size:14px;font-weight:600;color:var(--muted)}
 .tp-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:6px}
@@ -715,7 +715,9 @@ function createDemoAdapter() {
     async signIn() {},
     async signOut() {},
     async requestPasswordReset() {},
+    async verifyRecoveryToken() { throw new Error('Demó módban nincs jelszó-visszaállítás.'); },
     async updatePassword() {},
+    async recoveryDetected() { return false; },
     onPasswordRecovery() {},
     async me() {
       return {
@@ -1094,7 +1096,9 @@ async function createSupabaseAdapter() {
   // A munkamenet a böngészőben marad és magától frissül, tehát nem kell
   // naponta belépni (a tényleges felső határt a Supabase Auth → Sessions
   // beállítása szabja meg; ha ott nincs korlát, a munkamenet addig él, amíg
-  // ki nem jelentkezünk). A PKCE folyam kell a jelszó-visszaállító linkhez.
+  // ki nem jelentkezünk). A PKCE folyam a régi, {{ .ConfirmationURL }}-es
+  // jelszó-visszaállító levelekhez kell; az új levél token_hash-t hoz (lásd
+  // verifyRecoveryToken), ahhoz nem kell a kérő böngésző.
   const sb = mod.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY, {
     auth: {
       persistSession: true,
@@ -1103,6 +1107,21 @@ async function createSupabaseAdapter() {
       flowType: 'pkce',
       storageKey: 'mk-auth',
     },
+  });
+  // Valódi jelszó-visszaállítás jele: a supabase-js PASSWORD_RECOVERY eseménye.
+  // Ezt akkor küldi, ha a levélből hozott kódot ténylegesen beváltotta (friss
+  // kódcsere), illetve ha egy visszaállító token ellenőrzése sikerült – egy
+  // meglévő munkamenet és egy URL-paraméter (?recovery=1) ehhez NEM elég.
+  // A figyelőt RÖGTÖN itt kötjük be: a kódcsere már a kliens indulása közben
+  // lefut, és egy később (pl. a séma-ellenőrzés után) bekötött figyelő
+  // lekésne az eseményről – korábban emiatt kellett az URL-paraméterre
+  // hagyatkozni, és az volt a biztonsági rés.
+  let recoveryEvent = false;
+  const recoveryListeners = new Set();
+  sb.auth.onAuthStateChange(event => {
+    if (event !== 'PASSWORD_RECOVERY') return;
+    recoveryEvent = true;
+    recoveryListeners.forEach(fn => fn());
   });
   const q = async p => { const { data, error } = await p; if (error) throw new Error(error.message); return data; };
   const T = t => 'mk_' + t;
@@ -1179,7 +1198,11 @@ async function createSupabaseAdapter() {
       body: JSON.stringify(payload),
     });
     const out = await res.json().catch(() => null);
-    if (!res.ok) throw new Error((out && out.error) || 'A művelet nem sikerült.');
+    if (!res.ok) {
+      const err = new Error((out && out.error) || 'A művelet nem sikerült.');
+      err.details = out;
+      throw err;
+    }
     return out;
   };
   return {
@@ -1204,7 +1227,12 @@ async function createSupabaseAdapter() {
     },
     async createUser(payload) { return callApi('/api/mk-users', { action: 'create', ...payload }); },
     async deleteUser(userId) { return callApi('/api/mk-users', { action: 'delete', user_id: userId }); },
-    async listCompanies() { return (await callApi('/api/mk-admin', { action: 'list_companies' })).companies; },
+    async listCompanies() {
+      const out = await callApi('/api/mk-admin', { action: 'list_companies' });
+      const list = out.companies || [];
+      list.statsError = out.stats_error || null;       // a számok ilyenkor ismeretlenek (null)
+      return list;
+    },
     async createCompany(payload) { return callApi('/api/mk-admin', { action: 'create_company', ...payload }); },
     async updateLicense(payload) { return callApi('/api/mk-admin', { action: 'update_license', ...payload }); },
     async deleteCompany(payload) { return callApi('/api/mk-admin', { action: 'delete_company', ...payload }); },
@@ -1216,17 +1244,31 @@ async function createSupabaseAdapter() {
     // Jelszó-visszaállító levél. A választ SOHA nem tesszük függővé attól,
     // létezik-e a fiók – különben a bejelentkező képernyő elárulná, kinek van
     // itt fiókja. A levelet a Supabase Auth küldi (Resend SMTP-n keresztül).
+    // A redirectTo lekérdezés nélküli: a levélsablon ehhez fűzi hozzá a
+    // ?token_hash=…&type=recovery részt (lásd CLAUDE.md, Bejelentkezés).
     async requestPasswordReset(email) {
-      const redirectTo = location.origin + location.pathname + '?recovery=1';
-      await sb.auth.resetPasswordForEmail(email, { redirectTo });
+      await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+    },
+    // A levélből hozott egyszer használatos token beváltása. Ehhez nem kell a
+    // kérő böngésző (mint a PKCE-kódhoz), ezért a telefonon megnyitott levél is
+    // működik. Csak a felhasználó kattintására hívjuk, nem az oldal
+    // betöltésekor: a levelezők linkellenőrzője így nem tudja „elhasználni”.
+    async verifyRecoveryToken(tokenHash) {
+      const { data, error } = await sb.auth.verifyOtp({ token_hash: tokenHash, type: 'recovery' });
+      if (error || !data || !data.session) throw new Error('A jelszó-visszaállító link érvénytelen, lejárt vagy már felhasználták.');
     },
     async updatePassword(password) {
       const { error } = await sb.auth.updateUser({ password });
       if (error) throw new Error(error.message || 'Nem sikerült beállítani az új jelszót.');
     },
-    onPasswordRecovery(cb) {
-      sb.auth.onAuthStateChange((event) => { if (event === 'PASSWORD_RECOVERY') cb(); });
+    // Volt-e ebben a betöltésben valódi jelszó-visszaállítás (lásd fent). A
+    // getSession megvárja a kliens indulását, vagyis a kódcserét is.
+    async recoveryDetected() {
+      await sb.auth.getSession();
+      await new Promise(r => setTimeout(r, 0));
+      return recoveryEvent;
     },
+    onPasswordRecovery(cb) { recoveryListeners.add(cb); },
     async signOut() { await sb.auth.signOut(); },
     async loadMaster() {
       const [teams, locations, employees, tasks, terminals] = await Promise.all([
@@ -1355,6 +1397,7 @@ const S = {
   me: null,                    // profil + cég + licenc-állapot (lásd api.me())
   meError: null,               // ha a profil betöltése hibázik, NE csendben nyeljük el
   schema: null,                // az adatbázis séma-állapota (006): { tracked, versions, missing }
+  recovery: null,              // jelszó-visszaállítás folyamatban: { mode: 'token' | 'event', tokenHash, verified }
   users: [],                   // a cég felhasználói (Törzsadatok → Felhasználók)
   companies: [],               // rendszergazda-nézet: az összes cég
   reports: (() => {
@@ -2200,29 +2243,53 @@ function licenseModal(companyId) {
   });
 }
 
+/* Darabszám a Cégek nézetben: ha a szerver nem tudta megszámolni (null),
+   „ismeretlen” – sosem 0, mert a törlés megerősítése ebből mondja meg, mi vész el. */
+const countText = (n, noun) => (Number.isFinite(n) ? `${n} ${noun}` : `ismeretlen számú ${noun}`);
+
 /* Cég és minden adatának végleges törlése. A név begépeltetése szándékos:
    ez az egyetlen visszafordíthatatlan művelet a felületen, és a GDPR
-   szerinti végleges törlés is ezen az úton megy majd. */
+   szerinti végleges törlés is ezen az úton megy.
+   A szerver lépésenként ellenőriz. Nagy cégnél a rajzokat több körben törli
+   (202 + continue) – ilyenkor ugyanezt a kérést ismételjük, és kiírjuk, hol
+   tart. Ha egy lépés elbukik, a hibaüzenet megmondja, mi készült el és mi van
+   hátra; a cég felfüggesztve a listában marad, és egy újabb Törlés onnan
+   folytatja. */
 function companyDeleteModal(companyId, companyName) {
   const c = S.companies.find(x => x.id === companyId);
   if (!c) return;
   openModal({
     title: `Cég törlése – ${companyName}`,
     body: `<p><b>Ez a művelet nem vonható vissza.</b> Törlődik a cég minden adata:
-        ${Number(c.employee_count || 0)} dolgozó, ${Number(c.event_count || 0)} esemény, a beosztások,
+        ${countText(c.employee_count, 'dolgozó')}, ${countText(c.event_count, 'esemény')}, a beosztások,
         a feltöltött rajzok és ${(c.users || []).length} bejelentkezési fiók.</p>
       <p class="muted">A dolgozók munkaideje és a riportok is elvesznek – ha kellhet még, előbb töltsd le az Excel exportot a cég fiókjával.</p>
       <label class="field"><span>Írd be a cég nevét a megerősítéshez: <b>${esc(companyName)}</b></span>
-        <input id="f-confirm" autocapitalize="none" autocorrect="off" spellcheck="false"></label>`,
+        <input id="f-confirm" autocapitalize="none" autocorrect="off" spellcheck="false"></label>
+      <p class="muted small" id="f-del-progress" hidden></p>`,
     actions: [{ label: 'Mégse' }, {
       label: 'Végleges törlés', primary: true, onClick: async modal => {
         const confirmName = $('#f-confirm', modal).value.trim();
         if (confirmName !== companyName) throw new Error('A megerősítéshez pontosan a cég nevét kell beírni.');
-        const res = await S.api.deleteCompany({ company_id: companyId, confirm_name: confirmName });
-        S.companies = await S.api.listCompanies();
-        renderCompanies();
-        const d = (res && res.deleted) || {};
-        toast(`Cég törölve${d.files ? ` (${d.files} fájllal együtt)` : ''}`);
+        const progress = $('#f-del-progress', modal);
+        const payload = { company_id: companyId, confirm_name: confirmName };
+        let res, rounds = 0, files = 0, users = 0;
+        try {
+          for (;;) {
+            res = await S.api.deleteCompany(payload);
+            files += ((res && (res.progress || res.deleted)) || {}).files || 0;
+            users += ((res && (res.progress || res.deleted)) || {}).users || 0;
+            if (!res || !res.continue) break;
+            if (++rounds >= 200) throw new Error('A törlés nem ért véget 200 kör alatt sem. Nyomd meg újra a Törlést – onnan folytatja.');
+            progress.hidden = false;
+            progress.textContent = `Törlés folyamatban… eddig ${files} rajz és ${users} bejelentkezési fiók törölve.`;
+          }
+        } finally {
+          // Siker és hiba esetén is frissül a lista: egy félbemaradt cég
+          // felfüggesztve látszik benne.
+          try { S.companies = await S.api.listCompanies(); renderCompanies(); } catch (e) { /* a hibát fent jelezzük */ }
+        }
+        toast(`Cég törölve${files ? ` (${files} rajzzal együtt)` : ''}`);
       },
     }],
   });
@@ -2246,6 +2313,7 @@ function renderCompanies() {
     <div class="admin-head"><p class="muted">Rendszergazda-nézet: az összes ügyfélcég és a licencük. A cégek napi adatait (dolgozók, munkaidő, riportok) ez a nézet szándékosan nem mutatja – a rendszergazdának nincs rálátása egy cég üzleti adataira.</p>
       <button class="btn btn-primary" data-act="company-new">Új cég</button></div>
     ${schemaStatusLine()}
+    ${S.companies.statsError ? `<p class="muted small">${esc(S.companies.statsError)}</p>` : ''}
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Cég</th><th>Felhasználók</th><th>Használat</th><th>Licenc</th><th></th></tr></thead><tbody>
     ${S.companies.map((c, i) => {
       const expired = c.active === false || (c.license_expires_at && new Date(c.license_expires_at) < new Date());
@@ -2254,7 +2322,7 @@ function renderCompanies() {
         <td>${esc(c.name)}${i === 0 ? ' <span class="tag">első cég</span>' : ''}${mine ? ' <span class="tag">a te céged</span>' : ''}
           <div class="muted small">létrehozva: ${c.created_at ? esc(fmtDateHu(budapestDay(c.created_at))) : '–'}</div></td>
         <td>${(c.users || []).map(u => `<div>${esc(u.username || u.email || '?')}${u.role === 'owner' ? ' <span class="muted small">(tul.)</span>' : ''}<div class="muted small">${esc(u.email || '–')}</div></div>`).join('') || '–'}</td>
-        <td>${Number(c.employee_count || 0)} dolgozó<div class="muted small">${Number(c.event_count || 0)} esemény${c.last_event_at ? ', utoljára ' + esc(fmtDateHu(budapestDay(c.last_event_at))) : ''}</div></td>
+        <td>${countText(c.employee_count, 'dolgozó')}<div class="muted small">${countText(c.event_count, 'esemény')}${c.last_event_at ? ', utoljára ' + esc(fmtDateHu(budapestDay(c.last_event_at))) : ''}</div></td>
         <td>${c.active === false ? '<span class="tag">felfüggesztve</span> ' : ''}${c.license_expires_at ? esc(fmtDateLong(new Date(c.license_expires_at))) + (expired && c.active !== false ? ' <span class="tag">lejárt</span>' : '') : 'nincs lejárat'}</td>
         <td class="actions"><button class="btn small" data-act="company-license" data-id="${c.id}">Licenc</button>${
           i === 0 || mine ? '' : `<button class="btn small ghost" data-act="company-del" data-id="${c.id}" data-name="${esc(c.name)}">Törlés</button>`}</td>
@@ -3493,27 +3561,58 @@ function renderForgot(msg, email) {
   }
 }
 
-/* Új jelszó megadása a levélből érkezve. Ide csak érvényes visszaállító
-   munkamenettel lehet eljutni – ha az lejárt, új linket kell kérni. */
+/* Új jelszó megadása a levélből érkezve. Két úton lehet ide jutni, és
+   mindkettő azt bizonyítja, hogy a felhasználó hozzáfér a postafiókjához:
+   – 'token': a levél token_hash-t hozott. A jelszó mentése ELŐTT ezt
+     ellenőrizzük (verifyRecoveryToken), és ha érvénytelen, semmit nem
+     mentünk – akkor sem, ha a böngészőben épp be van jelentkezve valaki;
+   – 'event': a supabase-js PASSWORD_RECOVERY eseménye (a régi, PKCE-s
+     levélből, a kérő böngészőben).
+   Egy puszta ?recovery=1 és egy meglévő munkamenet ide NEM visz be: korábban
+   ezzel egy nyitva hagyott irodai gépen bárki új jelszót állíthatott be a
+   régi ismerete nélkül, vagyis átvehette a fiókot. */
+function enterRecovery(mode, extra) {
+  if (S.recovery) return;           // már itt vagyunk (a token ellenőrzése maga is küld eseményt)
+  S.recovery = { mode, verified: mode === 'event', ...extra };
+  renderNewPassword();
+}
+
 function renderNewPassword(err) {
+  const R = S.recovery;
+  if (!R) return renderLogin();
   loginShell(`<p class="muted">Új jelszó beállítása</p>
     <label class="field"><span>Új jelszó</span><input id="l-pass" type="password" autocomplete="new-password" placeholder="legalább ${CONFIG.PASSWORD_MIN} karakter, betű és szám"></label>
     <label class="field"><span>Új jelszó még egyszer</span><input id="l-pass2" type="password" autocomplete="new-password"></label>
     ${err ? `<p class="form-err">${esc(err)}</p>` : ''}
     <button class="btn btn-primary wide" id="l-save">Jelszó mentése</button>
     <button class="btn ghost wide" id="l-back">Mégse</button>`);
-  $('#l-back').onclick = async () => { await S.api.signOut(); location.replace(location.pathname); };
+  // Mégse: egy még nem ellenőrzött tokennél NEM jelentkeztetünk ki – az a
+  // munkamenet (ha van) nem ehhez a visszaállításhoz tartozik.
+  $('#l-back').onclick = async () => {
+    if (R.verified) await S.api.signOut();
+    S.recovery = null;
+    location.replace(location.pathname);
+  };
   const submit = async () => {
     const pw = $('#l-pass').value, pw2 = $('#l-pass2').value;
     const bad = badPasswordMsg(pw);
     if (bad) return renderNewPassword(bad);
     if (pw !== pw2) return renderNewPassword('A két jelszó nem egyezik.');
     $('#l-save').disabled = true;
+    if (!R.verified) {
+      try {
+        await S.api.verifyRecoveryToken(R.tokenHash);
+        R.verified = true;
+      } catch (e) {
+        return renderNewPassword(`${e.message} Kérj új linket az „Elfelejtett jelszó” gombbal.`);
+      }
+    }
     try {
       await S.api.updatePassword(pw);
     } catch (e) {
       return renderNewPassword((e.message || '') + ' Lehet, hogy lejárt a link – kérj újat.');
     }
+    S.recovery = null;
     // A címsorból tűnjön el a visszaállító paraméter, hogy egy frissítés ne
     // dobja vissza ide a felhasználót.
     history.replaceState(null, '', location.pathname);
@@ -3523,7 +3622,7 @@ function renderNewPassword(err) {
   };
   $('#l-save').onclick = submit;
   $('#l-pass2').onkeydown = e => { if (e.key === 'Enter') submit(); };
-  $('#l-pass').focus();
+  $('#l-pass').focus({ preventScroll: true });
 }
 
 /* Ugyanaz a szabály, mint a szerveren (src/lib/mk-supabase.ts badPassword). */
@@ -3791,11 +3890,14 @@ async function boot() {
   document.addEventListener('keydown', onKey);
   const params = new URLSearchParams(location.search);
   const terminalId = params.get('terminal');
-  // A jelszó-visszaállító levélből ezzel a jelzéssel térünk vissza. Kétféle
-  // jelet is nézünk, mert a Supabase folyamtól függően hol a query, hol a
-  // hash hordozza – egy elmulasztott jelzés azt jelentené, hogy a felhasználó
-  // bejelentkezve landol, de az új jelszót sosem tudja megadni.
-  const recoveryHint = params.get('recovery') === '1' || /type=recovery/.test(location.hash);
+  // Jelszó-visszaállító levélből érkezés. Az új levél token_hash-t hoz (ez
+  // bármelyik eszközön működik), a régi PKCE-kódot (?code=…), a 2026.
+  // szeptember 25. előtti levelek ?recovery=1-et is. Ezek a jelek önmagukban
+  // SEMMIRE nem jogosítanak (lásd enterRecovery): csak azt tudjuk belőlük,
+  // hogy ha a visszaállítás nem jön össze, meg kell mondani, miért.
+  const tokenHash = params.get('type') === 'recovery' ? params.get('token_hash') : null;
+  const recoveryLink = Boolean(tokenHash) || params.has('code') || params.get('recovery') === '1'
+    || /type=recovery|error_description/.test(location.hash);
   const live = Boolean(CONFIG.SUPABASE_URL && CONFIG.SUPABASE_ANON_KEY);
   try {
     S.api = live ? await createSupabaseAdapter() : createDemoAdapter();
@@ -3812,13 +3914,25 @@ async function boot() {
   }
   // A séma-ellenőrzés a bejelentkezés ELŐTT fut: a lemaradás a bejelentkező
   // képernyőn is látszódjon (a tableten nem – ott a dolgozó nem tud vele mit
-  // kezdeni, a kioszk ág fentebb már visszatért).
-  S.schema = await checkSchema();
-  renderSchemaAlert();
-  if (S.api.onPasswordRecovery) S.api.onPasswordRecovery(() => renderNewPassword());
+  // kezdeni, a kioszk ág fentebb már visszatért). A munkamenet betöltésével
+  // párhuzamosan megy, hogy ne lassítsa a belépést.
+  const schemaReady = checkSchema();
+  if (tokenHash) S.recovery = { mode: 'token', tokenHash, verified: false };
+  S.api.onPasswordRecovery(() => enterRecovery('event'));
   S.session = await S.api.getSession();
-  if (recoveryHint) return renderNewPassword();
-  if (!S.session) { renderLogin(); schemaAlertModal(); return; }
+  const recovered = await S.api.recoveryDetected();
+  // A kódcsere addigra lement: a visszaállító jelek (és a token) eltűnnek a
+  // címsorból, hogy se az előzményekben, se egy frissítéskor ne maradjanak.
+  if (recoveryLink) history.replaceState(null, '', location.pathname);
+  S.schema = await schemaReady;
+  renderSchemaAlert();
+  if (S.recovery) { renderNewPassword(); return; }
+  if (recovered) { enterRecovery('event'); return; }
+  if (!S.session) {
+    renderLogin(recoveryLink ? 'Ezzel a jelszó-visszaállító linkkel nem sikerült belépni: lejárt, már felhasználták, vagy egy régebbi levélből más böngészőben nyitottad meg, mint ahol kérted. Kérj új linket az „Elfelejtett jelszó” gombbal.' : undefined);
+    schemaAlertModal();
+    return;
+  }
   await afterLogin();
   schemaAlertModal();
 }
