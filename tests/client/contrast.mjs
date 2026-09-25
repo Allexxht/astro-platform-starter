@@ -7,9 +7,10 @@
 // a mögötte lévő (felfelé keresett, átlátszóságot is összemosó) háttér
 // kontrasztja. A küszöb 4,5:1, nagy szövegnél (24px, vagy 18,66px félkövér)
 // 3:1. Kimarad: letiltott gomb, rejtett elem, és ami a sötét szigeten van
-// (.theme-dark) – azt a sötét téma mérése fedi.
-export async function auditText(page, { skipDark = true } = {}) {
-  return page.evaluate((skipDark) => {
+// (.theme-dark) – azt a sötét téma mérése fedi. all: minden elemet visszaad,
+// nem csak a küszöb alattiakat (két változat összevetéséhez).
+export async function auditText(page, { skipDark = true, all = false } = {}) {
+  return page.evaluate(([skipDark, all]) => {
     const cv = document.createElement('canvas'); cv.width = cv.height = 1;
     const cx = cv.getContext('2d', { willReadFrequently: true });
     const rgba = (s) => { cx.clearRect(0, 0, 1, 1); cx.fillStyle = '#000'; cx.fillStyle = s; cx.fillRect(0, 0, 1, 1); const d = cx.getImageData(0, 0, 1, 1).data; return [d[0], d[1], d[2], d[3] / 255]; };
@@ -40,10 +41,10 @@ export async function auditText(page, { skipDark = true } = {}) {
       const size = parseFloat(cs.fontSize), bold = parseInt(cs.fontWeight, 10) >= 700;
       const need = (size >= 24 || (bold && size >= 18.66)) ? 3 : 4.5;
       const cr = ratio(col, bg);
-      if (cr < need) out.push({ text: el.textContent.trim().slice(0, 40), cls: el.className && String(el.className).slice(0, 40), ratio: +cr.toFixed(2), need });
+      if (all || cr < need) out.push({ text: el.textContent.trim().slice(0, 40), cls: el.className && String(el.className).slice(0, 40), ratio: +cr.toFixed(2), need });
     }
     return out;
-  }, skipDark);
+  }, [skipDark, all]);
 }
 
 // Egy elem háttérszínének kontrasztja egy adott színhez képest (pl. a
